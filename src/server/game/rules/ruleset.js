@@ -374,19 +374,6 @@ const RULES = [
     },
   },
   {
-    id: "del_spawn_rocks_3",
-    kind: "delayed",
-    delayTurns: 3,
-    name: "Rock Garden",
-    description: "In 3 turns, all empty squares spawn blocking rocks.",
-    apply(game) {
-      for (let i = 0; i < 64; i++) {
-        if (game.missingSquares.has(i) || game.hazards.deadly.has(i)) continue;
-        if (!game.state.board[i]) game.state.board[i] = { type: "x", color: "x", moved: true };
-      }
-    },
-  },
-  {
     id: "del_queens_explode_5",
     kind: "delayed",
     delayTurns: 5,
@@ -449,7 +436,7 @@ const RULES = [
     delayTurns: 4,
     name: "March of Kings",
     description: "In 4 turns, kings are forced to move every turn.",
-    apply(game) {
+    apply(game) {the css is sitll m
       game.permanent.forcedKingMove = true;
     },
   },
