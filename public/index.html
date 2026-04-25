@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chaos Chess (Multiplayer)</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">Chaos Chess</div>
+        <div id="status" class="status">Not connected</div>
+      </header>
+
+      <main class="layout">
+        <section class="left">
+          <div class="panel" id="lobbyPanel">
+            <h2>Lobby</h2>
+            <div class="row">
+              <input id="nameInput" placeholder="Name" maxlength="16" />
+            </div>
+            <div class="row gap">
+              <button id="createBtn">Create lobby</button>
+              <input id="codeInput" placeholder="Code" maxlength="6" />
+              <button id="joinBtn">Join</button>
+            </div>
+            <div class="hint">
+              Create → share the code. Join → paste code. Every 3 moves, both players pick a random rule card.
+            </div>
+          </div>
+
+          <div class="panel" id="gamePanel" hidden>
+            <div class="gameHeader">
+              <div>
+                <div class="line">
+                  <span class="label">Lobby</span> <span id="lobbyCode">—</span>
+                </div>
+                <div class="line">
+                  <span class="label">You</span> <span id="youInfo">—</span>
+                </div>
+              </div>
+              <div class="rightInfo">
+                <div class="line"><span class="label">Turn</span> <span id="turnInfo">—</span></div>
+                <div class="line"><span class="label">Ply</span> <span id="plyInfo">0</span></div>
+              </div>
+            </div>
+
+            <div class="boardWrap">
+              <canvas id="board" width="720" height="720"></canvas>
+              <div id="overlayText" class="overlayText"></div>
+            </div>
+
+            <div class="cardsArea">
+              <div class="cardsHeader">
+                <h3>Active Rules</h3>
+                <div id="gameMsg" class="gameMsg"></div>
+              </div>
+              <div id="activeCards" class="cards"></div>
+            </div>
+
+            <div class="cardsArea" id="choiceArea" hidden>
+              <div class="cardsHeader">
+                <h3>Pick 1 rule (you get 3)</h3>
+                <div id="choiceTimer" class="timer"></div>
+              </div>
+              <div id="choiceCards" class="cards choice"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="right">
+          <div class="panel logPanel">
+            <h2>Events</h2>
+            <div id="log" class="log"></div>
+          </div>
+          <div class="panel helpPanel">
+            <h2>How to play</h2>
+            <div class="help">
+              Click a piece, then click a destination. Server validates moves. Promotions default to Queen.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+  </body>
+</html>
+
