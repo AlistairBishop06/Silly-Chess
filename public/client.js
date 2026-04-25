@@ -287,19 +287,74 @@ function renderCards() {
   const s = state.serverState;
   els.activeCards.innerHTML = "";
   for (const r of s.activeRules || []) {
-    const div = document.createElement("div");
-    div.className = `card ${r.kind}`;
-    div.innerHTML = `
-      <div class="name">${escapeHtml(r.name)}</div>
-      <div class="desc">${escapeHtml(r.description)}</div>
-      <div class="meta">
-        <span>${escapeHtml(r.typeLabel)}</span>
-        <span>${r.remaining != null ? `${r.remaining}t` : ""}</span>
-      </div>
-    `;
-    bindCardFX(div);
-    els.activeCards.appendChild(div);
+    els.activeCards.appendChild(buildRuleCard(r, { pickable: false }));
   }
+}
+
+function ruleTypeIcon(kind) {
+  if (kind === "instant") return "⚡";
+  if (kind === "delayed") return "⏳";
+  return "⏱";
+}
+
+function ruleArtIcon(ruleId, ruleName) {
+  const id = String(ruleId || "").toLowerCase();
+  const name = String(ruleName || "").toLowerCase();
+
+  const hay = `${id} ${name}`;
+
+  if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "💥";
+  if (hay.includes("lava")) return "🌋";
+  if (hay.includes("deadly") || hay.includes("death")) return "☠";
+  if (hay.includes("shield")) return "🛡";
+  if (hay.includes("swap") || hay.includes("mirror")) return "⇄";
+  if (hay.includes("teleport")) return "🌀";
+  if (hay.includes("shuffle") || hay.includes("random") || hay.includes("rps") || hay.includes("dice")) return "🎲";
+  if (hay.includes("flip") || hay.includes("rotate") || hay.includes("turn")) return "🔄";
+  if (hay.includes("spawn") || hay.includes("block") || hay.includes("wall")) return "🧱";
+  if (hay.includes("extra move") || hay.includes("double")) return "⏩";
+
+  if (hay.includes("queen")) return "♛";
+  if (hay.includes("king")) return "♚";
+  if (hay.includes("rook")) return "♜";
+  if (hay.includes("bishop")) return "♝";
+  if (hay.includes("knight")) return "♞";
+  if (hay.includes("pawn")) return "♟";
+
+  if (hay.includes("center")) return "⦿";
+  if (hay.includes("column") || hay.includes("file")) return "▮";
+  if (hay.includes("edge") || hay.includes("perimeter")) return "⬚";
+
+  return "✦";
+}
+
+function buildRuleCard(r, { pickable }) {
+  const div = document.createElement("div");
+  div.className = `card ${pickable ? "pickable" : ""} ${r.kind}`.trim().replace(/\s+/g, " ");
+
+  const turns = r.remaining != null ? `${r.remaining}t` : "";
+  const typeIcon = ruleTypeIcon(r.kind);
+  const artIcon = ruleArtIcon(r.id, r.name);
+
+  div.innerHTML = `
+    <div class="cardTop">
+      <div class="cardTopLeft">
+        <div class="cardTypeIcon" aria-hidden="true">${typeIcon}</div>
+        <div class="cardTitleStack">
+          <div class="name">${escapeHtml(r.name)}</div>
+          <div class="typeLabel">${escapeHtml(r.typeLabel)}</div>
+        </div>
+      </div>
+      <div class="cardTurns" ${turns ? "" : "hidden"}>${escapeHtml(turns)}</div>
+    </div>
+    <div class="cardArt" aria-hidden="true">
+      <div class="cardArtIcon">${artIcon}</div>
+    </div>
+    <div class="desc">${escapeHtml(r.description)}</div>
+  `;
+
+  bindCardFX(div);
+  return div;
 }
 
 function bindCardFX(card) {
@@ -381,17 +436,7 @@ function renderChoice() {
 
   els.choiceCards.innerHTML = "";
   for (const r of choice) {
-    const div = document.createElement("div");
-    div.className = `card pickable ${r.kind}`;
-    div.innerHTML = `
-      <div class="name">${escapeHtml(r.name)}</div>
-      <div class="desc">${escapeHtml(r.description)}</div>
-      <div class="meta">
-        <span>${escapeHtml(r.typeLabel)}</span>
-        <span>${r.remaining != null ? `${r.remaining}t` : ""}</span>
-      </div>
-    `;
-    bindCardFX(div);
+    const div = buildRuleCard(r, { pickable: true });
     div.addEventListener("click", () => {
       socket.emit("game:chooseRule", { code: state.lobby, playerId: state.playerId, ruleId: r.id }, (res) => {
         if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "rule pick failed")}`);
