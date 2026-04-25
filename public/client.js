@@ -152,6 +152,7 @@ function draw() {
       let fill = light ? "#dbe2ff" : "#3c4b83";
       if (s.hazards?.lava?.includes(sq)) fill = light ? "#ffb4b4" : "#c24848";
       if (s.hazards?.deadly?.includes(sq)) fill = light ? "#ffd7a8" : "#9a5520";
+      if (s.marks?.lightning?.includes(sq)) fill = light ? "#fff1a8" : "#b88d1c";
       if (s.missingSquares?.includes(sq)) fill = "rgba(10,12,18,0.65)";
 
       ctx.fillStyle = fill;

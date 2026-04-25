@@ -25,6 +25,7 @@ class RuleManager {
       .map((inst) => {
         const r = getRuleById(inst.ruleId);
         if (!r) return null;
+        const targetSq = inst.data?.targetSq;
         return {
           instanceId: inst.instanceId,
           id: r.id,
@@ -33,6 +34,7 @@ class RuleManager {
           kind: kindClass(r),
           typeLabel: ruleTypeLabel(r),
           remaining: inst.kind === "duration" ? inst.remaining : inst.kind === "delayed" ? inst.triggerIn : null,
+          targetSq: typeof targetSq === "number" ? targetSq : null,
         };
       })
       .filter(Boolean);
@@ -75,7 +77,7 @@ class RuleManager {
   addRule(ruleId) {
     const r = getRuleById(ruleId);
     if (!r) return { ok: false, error: "Unknown rule" };
-    const inst = { instanceId: `R${this.instanceSeq++}`, ruleId: r.id, kind: r.kind, remaining: null, triggerIn: null };
+    const inst = { instanceId: `R${this.instanceSeq++}`, ruleId: r.id, kind: r.kind, remaining: null, triggerIn: null, data: {} };
 
     if (r.kind === "instant") {
       this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: r.name });
@@ -85,6 +87,7 @@ class RuleManager {
 
     if (r.kind === "delayed") {
       inst.triggerIn = r.delayTurns;
+      r.onSchedule?.(this.game, inst);
       this.active.push(inst);
       this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} (scheduled)` });
       return { ok: true, applied: "delayed" };
@@ -111,7 +114,7 @@ class RuleManager {
         inst.triggerIn -= 1;
         if (inst.triggerIn <= 0) {
           this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} triggers!` });
-          r.apply?.(this.game, { flags: {} });
+          r.apply?.(this.game, { flags: {}, inst });
           continue;
         }
         still.push(inst);
@@ -134,4 +137,3 @@ class RuleManager {
 }
 
 module.exports = { RuleManager };
-

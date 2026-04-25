@@ -31,6 +31,7 @@ function deepCloneState(game) {
     missingSquares: [...game.missingSquares],
     extraMoves: { ...game.extraMoves },
     shield: { ...game.shield },
+    marks: { lightning: [...(game.marks?.lightning || [])] },
   };
 }
 
@@ -67,6 +68,7 @@ class Game {
 
     this.hazards = { deadly: new Set(), lava: new Set() };
     this.missingSquares = new Set();
+    this.marks = { lightning: new Set() };
 
     this.lastMoveSquares = [];
 
@@ -270,8 +272,86 @@ class Game {
     this.missingSquares = new Set(snap.missingSquares);
     this.extraMoves = { ...snap.extraMoves };
     this.shield = { ...snap.shield };
+    this.marks = { lightning: new Set(snap.marks?.lightning || []) };
     this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Time reversed ${plies} turns!` });
     return true;
+  }
+
+  movePathSquares(from, to) {
+    const ff = idxToFile(from);
+    const fr = idxToRank(from);
+    const tf = idxToFile(to);
+    const tr = idxToRank(to);
+    const df = tf - ff;
+    const dr = tr - fr;
+
+    const absDf = Math.abs(df);
+    const absDr = Math.abs(dr);
+    const isLine = df === 0 || dr === 0 || absDf === absDr;
+    if (!isLine) return [from, to];
+
+    const sf = Math.sign(df);
+    const sr = Math.sign(dr);
+    const out = [from];
+    let f = ff;
+    let r = fr;
+    while (f !== tf || r !== tr) {
+      f += sf;
+      r += sr;
+      out.push(toIdx(f, r));
+      if (out.length > 64) break;
+    }
+    return out;
+  }
+
+  applyIceSlide(from, to) {
+    const ff = idxToFile(from);
+    const fr = idxToRank(from);
+    const tf = idxToFile(to);
+    const tr = idxToRank(to);
+    const df = tf - ff;
+    const dr = tr - fr;
+
+    const absDf = Math.abs(df);
+    const absDr = Math.abs(dr);
+    const isLine = df === 0 || dr === 0 || absDf === absDr;
+    if (!isLine) return to;
+
+    const stepF = Math.sign(df);
+    const stepR = Math.sign(dr);
+    if (stepF === 0 && stepR === 0) return to;
+
+    let cur = to;
+    while (true) {
+      const f = idxToFile(cur) + stepF;
+      const r = idxToRank(cur) + stepR;
+      if (f < 0 || f > 7 || r < 0 || r > 7) break;
+      const next = toIdx(f, r);
+      if (this.missingSquares.has(next)) break;
+      if (this.state.board[next]) break;
+      this.state.board[next] = this.state.board[cur];
+      this.state.board[cur] = null;
+      cur = next;
+    }
+    return cur;
+  }
+
+  applyEchoTrail(pathSquares, movedPiece) {
+    if (!movedPiece || movedPiece.color === "x") return;
+    if (movedPiece.type === "k") return;
+
+    const clonePiece = (p) => ({
+      type: p.type,
+      color: p.color,
+      moved: true,
+      tags: p.tags ? [...p.tags] : undefined,
+    });
+
+    for (const sq of pathSquares) {
+      if (this.missingSquares.has(sq)) continue;
+      if (this.state.board[sq]?.type === "k") continue;
+      this.state.board[sq] = clonePiece(movedPiece);
+    }
   }
 
   tryMove(playerId, { from, to, promotion }) {
@@ -302,6 +382,7 @@ class Game {
     const next = applyMoveNoValidation(this.state, { from, to, promotion }, mods);
     this.state = next;
     this.ply += 1;
+    let finalTo = to;
     this.lastMoveSquares = [from, to];
 
     // Consume shield if it would have mattered (next player is in check).
@@ -320,8 +401,22 @@ class Game {
       }
     }
 
-    // Trails: leave blocks behind.
-    if (mods.trails) {
+    // Ice Board: slide moved piece along its move direction.
+    if (mods.iceBoard) {
+      const movedPiece = this.state.board[finalTo];
+      if (movedPiece) {
+        finalTo = this.applyIceSlide(from, finalTo);
+        this.lastMoveSquares = [from, finalTo];
+      }
+    }
+
+    // Echo Trail: copy the moved piece along its path.
+    if (mods.echoTrail) {
+      const movedPiece = this.state.board[finalTo];
+      const path = this.movePathSquares(from, finalTo);
+      this.applyEchoTrail(path, movedPiece);
+    } else if (mods.trails) {
+      // Trails: leave blocks behind (but not if Echo Trail filled the origin).
       if (!this.state.board[from] && !this.missingSquares.has(from)) {
         this.state.board[from] = { type: "x", color: "x", moved: true };
         this.trailBlocks.push(from);
@@ -363,7 +458,7 @@ class Game {
 
     // Shapeshifters: randomize moved piece type (exclude king).
     if (mods.randomTypeAfterMove) {
-      const p2 = this.state.board[to];
+      const p2 = this.state.board[finalTo];
       if (p2 && p2.type !== "k" && p2.color !== "x") {
         const types = ["p", "n", "b", "r", "q"];
         p2.type = types[Math.floor(Math.random() * types.length)];
@@ -371,7 +466,7 @@ class Game {
     }
 
     // Hazards after move.
-    this.applyHazardsAfterMove(to);
+    this.applyHazardsAfterMove(finalTo);
 
     // Gravity / shifting / vanishing tiles after move.
     if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
@@ -434,6 +529,10 @@ class Game {
       lava: [...this.hazards.lava],
     };
 
+    const marks = {
+      lightning: [...(this.marks?.lightning || [])],
+    };
+
     return {
       started: this.started,
       players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color })),
@@ -449,6 +548,7 @@ class Game {
       ruleChoiceDeadlineMs: this.ruleChoiceDeadlineMs,
       effects: this.effects,
       hazards,
+      marks,
       missingSquares: [...this.missingSquares],
       visualFlip: this.visualFlipPlies > 0,
       lastMoveSquares: this.lastMoveSquares,

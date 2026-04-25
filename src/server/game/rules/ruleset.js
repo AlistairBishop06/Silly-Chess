@@ -81,8 +81,77 @@ function swapPieces(game, a, b) {
   game.state.board[b] = t;
 }
 
+function idxToAlg(idx) {
+  return String.fromCharCode(97 + idxToFile(idx)) + String(idxToRank(idx) + 1);
+}
+
 const RULES = [
   // 🔴 Instant (15)
+  {
+    id: "inst_oops_explosion",
+    kind: "instant",
+    name: "Oops Explosion",
+    description: "Random non-king piece detonates, removing itself and all adjacent pieces.",
+    apply(game) {
+      const nonKing = (p) => p.type !== "k" && p.color !== "x";
+      const target =
+        randomPieceSquare(game, randInt(2) === 0 ? "w" : "b", nonKing) ??
+        randomPieceSquare(game, "w", nonKing) ??
+        randomPieceSquare(game, "b", nonKing);
+      if (target == null) return;
+      destroySquares(game, [target, ...squaresAdjacent(target)], "oops");
+    },
+  },
+  {
+    id: "inst_pawn_herding",
+    kind: "instant",
+    name: "Pawn Herding",
+    description: "All pawns move toward the centre regardless of legality (server corrects illegal ones).",
+    apply(game) {
+      const pawns = [];
+      for (let i = 0; i < 64; i++) {
+        const p = game.state.board[i];
+        if (p && p.type === "p" && p.color !== "x") pawns.push(i);
+      }
+
+      // Shuffle for chaos (and to avoid bias).
+      for (let i = pawns.length - 1; i > 0; i--) {
+        const j = randInt(i + 1);
+        const t = pawns[i];
+        pawns[i] = pawns[j];
+        pawns[j] = t;
+      }
+
+      const centerF = 3.5;
+      const centerR = 3.5;
+
+      for (const from of pawns) {
+        const p = game.state.board[from];
+        if (!p || p.type !== "p") continue;
+        const f = idxToFile(from);
+        const r = idxToRank(from);
+        const df = f < centerF ? 1 : f > centerF ? -1 : 0;
+        const dr = r < centerR ? 1 : r > centerR ? -1 : 0;
+
+        const candidates = [
+          { nf: f + df, nr: r + dr },
+          { nf: f + df, nr: r },
+          { nf: f, nr: r + dr },
+        ];
+
+        for (const c of candidates) {
+          if (c.nf < 0 || c.nf > 7 || c.nr < 0 || c.nr > 7) continue;
+          const to = toIdx(c.nf, c.nr);
+          if (game.missingSquares.has(to)) continue;
+          if (game.state.board[to]) continue;
+          game.state.board[to] = game.state.board[from];
+          game.state.board[from] = null;
+          game.state.board[to].moved = true;
+          break;
+        }
+      }
+    },
+  },
   {
     id: "inst_rps_duel",
     kind: "instant",
@@ -311,6 +380,66 @@ const RULES = [
 
   // 🟡 In X Turns (15) — executed once when countdown hits 0.
   {
+    id: "del_mutation_event_5",
+    kind: "delayed",
+    delayTurns: 5,
+    name: "Mutation Event",
+    description: "In 5 turns, every piece randomly changes type once (except kings).",
+    apply(game) {
+      const types = ["p", "n", "b", "r", "q"];
+      for (let i = 0; i < 64; i++) {
+        const p = game.state.board[i];
+        if (!p || p.color === "x") continue;
+        if (p.type === "k") continue;
+        p.type = types[randInt(types.length)];
+      }
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Mutation complete." });
+    },
+  },
+  {
+    id: "del_black_hole_6",
+    kind: "delayed",
+    delayTurns: 6,
+    name: "Black Hole",
+    description: "In 6 turns, a random square becomes deadly (deletes anything that enters it).",
+    onSchedule(game, inst) {
+      const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i));
+      inst.data.targetSq = candidates[randInt(candidates.length)];
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Black hole forming at ${idxToAlg(inst.data.targetSq)}.` });
+    },
+    apply(game, ctx) {
+      const sq = ctx?.inst?.data?.targetSq;
+      if (typeof sq !== "number") return;
+      game.hazards.deadly.add(sq);
+      destroySquares(game, [sq], "blackHole");
+    },
+  },
+  {
+    id: "del_lightning_strike_10",
+    kind: "delayed",
+    delayTurns: 10,
+    name: "Lightning Strike",
+    description: "In 10 turns, the marked square is struck with lightning and kills whatever piece is on it.",
+    onSchedule(game, inst) {
+      const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i));
+      inst.data.targetSq = candidates[randInt(candidates.length)];
+      if (game.marks?.lightning) game.marks.lightning.add(inst.data.targetSq);
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Lightning marked ${idxToAlg(inst.data.targetSq)}.` });
+    },
+    apply(game, ctx) {
+      const sq = ctx?.inst?.data?.targetSq;
+      if (typeof sq !== "number") return;
+      if (game.marks?.lightning) game.marks.lightning.delete(sq);
+      const p = game.state.board[sq];
+      if (p && p.type !== "k" && p.color !== "x") {
+        game.state.board[sq] = null;
+        game.effects.push({ type: "explosion", squares: [sq], id: game.nextEffectId(), reason: "lightning" });
+      } else {
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: `Lightning struck ${idxToAlg(sq)}.` });
+      }
+    },
+  },
+  {
     id: "del_adjacent_king_destroy_3",
     kind: "delayed",
     delayTurns: 3,
@@ -370,19 +499,6 @@ const RULES = [
         const p = game.state.board[i];
         if (!p || p.color === "x" || p.type === "k") continue;
         p.color = p.color === "w" ? "b" : "w";
-      }
-    },
-  },
-  {
-    id: "del_spawn_rocks_3",
-    kind: "delayed",
-    delayTurns: 3,
-    name: "Rock Garden",
-    description: "In 3 turns, all empty squares spawn blocking rocks.",
-    apply(game) {
-      for (let i = 0; i < 64; i++) {
-        if (game.missingSquares.has(i) || game.hazards.deadly.has(i)) continue;
-        if (!game.state.board[i]) game.state.board[i] = { type: "x", color: "x", moved: true };
       }
     },
   },
@@ -449,7 +565,7 @@ const RULES = [
     delayTurns: 4,
     name: "March of Kings",
     description: "In 4 turns, kings are forced to move every turn.",
-    apply(game) {the css is sitll m
+    apply(game) {
       game.permanent.forcedKingMove = true;
     },
   },
@@ -496,6 +612,36 @@ const RULES = [
   },
 
   // 🟢 For X Turns (15)
+  {
+    id: "dur_ice_board_5",
+    kind: "duration",
+    durationTurns: 5,
+    name: "Ice Board",
+    description: "For 5 turns, pieces slide until they hit another piece or edge.",
+    modifiers() {
+      return { iceBoard: true };
+    },
+  },
+  {
+    id: "dur_overcharge_2",
+    kind: "duration",
+    durationTurns: 2,
+    name: "Overcharge",
+    description: "For 2 turns, every piece can move twice but must end on a legal square.",
+    modifiers() {
+      return { moveTwice: true };
+    },
+  },
+  {
+    id: "dur_echo_trail_1",
+    kind: "duration",
+    durationTurns: 1,
+    name: "Echo Trail",
+    description: "For 1 turn, whenever a piece moves, every square it passes through becomes filled with copies of that piece.",
+    modifiers() {
+      return { echoTrail: true };
+    },
+  },
   {
     id: "dur_only_pawns_5",
     kind: "duration",
