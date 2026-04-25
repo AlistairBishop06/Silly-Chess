@@ -10,6 +10,8 @@ npm start
 
 Then open `http://localhost:3000` in two browser windows:
 
+Or alternatively visit https://chaoschess.onrender.com/.
+
 1. Create a lobby in the first window → share the 6-char code
 2. Join from the second window using the code
 
