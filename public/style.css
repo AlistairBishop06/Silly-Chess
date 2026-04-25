@@ -186,25 +186,95 @@ canvas {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-top: 10px;
+  perspective: 1100px;
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 12px;
-  padding: 10px;
-  min-height: 90px;
+  --rx: 0deg;
+  --ry: 0deg;
+  --mx: 50%;
+  --my: 50%;
+  --card-accent: rgba(123, 211, 255, 0.55);
+
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 12px 12px 10px 12px;
+  min-height: 150px;
+  aspect-ratio: 2.5 / 3.5;
+
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(140% 120% at 20% 10%, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03) 55%, rgba(0, 0, 0, 0.22) 100%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.18));
+
+  transform-style: preserve-3d;
+  transform: translateY(var(--ty, 0px)) rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, filter 160ms ease;
+  will-change: transform;
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  background:
+    radial-gradient(800px 520px at var(--mx) var(--my), rgba(255, 255, 255, 0.40), rgba(255, 255, 255, 0.0) 52%),
+    linear-gradient(115deg, rgba(255, 0, 210, 0.0), rgba(123, 211, 255, 0.18), rgba(255, 229, 143, 0.0));
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+
+.card::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.00) 0px,
+      rgba(255, 255, 255, 0.00) 8px,
+      rgba(255, 255, 255, 0.08) 12px,
+      rgba(255, 255, 255, 0.00) 16px
+    );
+  background-position: var(--mx) var(--my);
+  mix-blend-mode: overlay;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+
+.card.is-tilting::before,
+.card.is-tilting::after {
+  opacity: 1;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  filter: saturate(1.05);
+  --ty: -2px;
 }
 
 .card .name {
   font-weight: 750;
   margin-bottom: 6px;
   font-size: 13px;
+  letter-spacing: 0.2px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
 }
 .card .desc {
   font-size: 12px;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.72);
   line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
 }
 .card .meta {
   margin-top: 8px;
@@ -220,14 +290,38 @@ canvas {
   overflow: hidden;
 }
 .card.pickable:hover {
-  border-color: rgba(123, 211, 255, 0.55);
-  box-shadow: 0 0 0 2px rgba(123, 211, 255, 0.10);
+  border-color: rgba(123, 211, 255, 0.60);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.50),
+    0 0 0 2px rgba(123, 211, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
-.card.pickable:active { transform: translateY(1px); }
+.card.pickable:active { --ty: 1px; }
 
 .card.instant .name { color: #ff8fb1; }
 .card.delayed .name { color: #ffe58f; }
 .card.duration .name { color: #8fffd8; }
+
+.card.instant { --card-accent: rgba(255, 143, 177, 0.55); }
+.card.delayed { --card-accent: rgba(255, 229, 143, 0.55); }
+.card.duration { --card-accent: rgba(143, 255, 216, 0.55); }
+
+.card.pickable::before {
+  background:
+    radial-gradient(800px 520px at var(--mx) var(--my), rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.0) 52%),
+    linear-gradient(115deg, rgba(255, 0, 210, 0.0), var(--card-accent), rgba(255, 229, 143, 0.0));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+    transform: none !important;
+  }
+  .card::before,
+  .card::after {
+    transition: none;
+  }
+}
 
 .logPanel .log {
   height: 420px;
@@ -250,4 +344,3 @@ canvas {
   .layout { grid-template-columns: 1fr; }
   .logPanel .log { height: 220px; }
 }
-

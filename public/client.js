@@ -37,6 +37,7 @@ const state = {
   flipVisual: false,
   particles: [],
   lastEffectsSeen: new Set(),
+  lastChoiceKey: null,
 };
 
 function logLine(html) {
@@ -296,8 +297,68 @@ function renderCards() {
         <span>${r.remaining != null ? `${r.remaining}t` : ""}</span>
       </div>
     `;
+    bindCardFX(div);
     els.activeCards.appendChild(div);
   }
+}
+
+function bindCardFX(card) {
+  if (!card || card.dataset.cardFx === "1") return;
+  card.dataset.cardFx = "1";
+
+  let raf = 0;
+  let next = { rx: 0, ry: 0, mx: "50%", my: "50%" };
+
+  const apply = () => {
+    raf = 0;
+    card.style.setProperty("--rx", `${next.rx}deg`);
+    card.style.setProperty("--ry", `${next.ry}deg`);
+    card.style.setProperty("--mx", next.mx);
+    card.style.setProperty("--my", next.my);
+  };
+
+  const schedule = () => {
+    if (raf) return;
+    raf = requestAnimationFrame(apply);
+  };
+
+  const updateFromPointer = (ev) => {
+    const rect = card.getBoundingClientRect();
+    const px = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    const py = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
+
+    const maxTilt = card.classList.contains("pickable") ? 16 : 12;
+    const ry = (px - 0.5) * maxTilt * 2;
+    const rx = -(py - 0.5) * maxTilt * 2;
+
+    next = {
+      rx,
+      ry,
+      mx: `${Math.round(px * 100)}%`,
+      my: `${Math.round(py * 100)}%`,
+    };
+    schedule();
+  };
+
+  card.addEventListener("pointerenter", () => {
+    card.classList.add("is-tilting");
+  });
+  card.addEventListener("pointermove", (ev) => {
+    if (ev.pointerType === "touch") return;
+    updateFromPointer(ev);
+  });
+  card.addEventListener("pointerleave", () => {
+    card.classList.remove("is-tilting");
+    next = { rx: 0, ry: 0, mx: "50%", my: "50%" };
+    schedule();
+  });
+}
+
+function updateChoiceTimer() {
+  const s = state.serverState;
+  if (!s || els.choiceArea.hidden) return;
+  const remainingMs = Math.max(0, (s.ruleChoiceDeadlineMs || 0) - Date.now());
+  els.choiceTimer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
 }
 
 function renderChoice() {
@@ -308,11 +369,15 @@ function renderChoice() {
   els.choiceArea.hidden = !needsChoice;
   if (!needsChoice) {
     els.choiceCards.innerHTML = "";
+    state.lastChoiceKey = null;
     return;
   }
 
-  const remainingMs = Math.max(0, (s.ruleChoiceDeadlineMs || 0) - Date.now());
-  els.choiceTimer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
+  updateChoiceTimer();
+
+  const choiceKey = (choice || []).map((r) => r.id).join("|");
+  if (choiceKey && choiceKey === state.lastChoiceKey) return;
+  state.lastChoiceKey = choiceKey;
 
   els.choiceCards.innerHTML = "";
   for (const r of choice) {
@@ -326,6 +391,7 @@ function renderChoice() {
         <span>${r.remaining != null ? `${r.remaining}t` : ""}</span>
       </div>
     `;
+    bindCardFX(div);
     div.addEventListener("click", () => {
       socket.emit("game:chooseRule", { code: state.lobby, playerId: state.playerId, ruleId: r.id }, (res) => {
         if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "rule pick failed")}`);
@@ -465,5 +531,5 @@ draw();
 
 setInterval(() => {
   if (!state.serverState) return;
-  if (!els.choiceArea.hidden) renderChoice();
+  updateChoiceTimer();
 }, 250);
