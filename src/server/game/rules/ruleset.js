@@ -587,6 +587,29 @@ const RULES = [
     },
   },
   {
+    id: "wall_5",
+    kind: "delayed",
+    delayTurns: 5,
+    name: "Build a Wall",
+    description: "In 5 turns, a diagonal death wall will be built.",
+    becomesPermanent: true,
+    apply(game) {
+      c = randInt(1,2)
+      if (c == 1){
+        for (let i = 0; i < 8; i++) {
+          game.hazards.deadly.add(toIdx(i, i));
+        }
+      }
+      else{
+        for (let i = 0; i < 8; i++) {
+          game.hazards.deadly.add(toIdx(i, 7-i));
+        }
+
+      }
+      destroySquares(game, [...game.hazards.deadly], "shrink");
+    },
+  },
+  {
     id: "del_auto_promote_pawns_4",
     kind: "delayed",
     delayTurns: 4,

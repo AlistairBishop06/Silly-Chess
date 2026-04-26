@@ -81,6 +81,7 @@ body {
   z-index: 50;
 }
 
+/*dont touch this*/
 .modal[hidden] {
   display: none;
 }
