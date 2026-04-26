@@ -169,6 +169,17 @@ canvas {
   text-align: right;
 }
 
+.leaveBtn {
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: rgba(255, 107, 107, 0.10);
+  border-color: rgba(255, 107, 107, 0.24);
+}
+.leaveBtn:hover {
+  background: rgba(255, 107, 107, 0.16);
+}
+
 .cardsArea {
   margin-top: 12px;
 }

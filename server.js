@@ -20,21 +20,90 @@ function getPlayerIdFromSocket(room, socketId) {
   return p?.id || null;
 }
 
+function getOrRebindPlayerId({ code, room, socket, playerId }) {
+  const bySocket = getPlayerIdFromSocket(room, socket.id);
+  if (bySocket) {
+    socket.join(code);
+    return bySocket;
+  }
+
+  // Self-heal: if the client reconnects and missed `lobby:resume`, allow binding
+  // an existing playerId that is currently disconnected (or bound to a dead socket).
+  if (playerId) {
+    const p = room.players.find((pl) => pl.id === playerId);
+    const boundSocket = p?.socketId ? io.sockets.sockets.get(p.socketId) : null;
+    const boundAlive = !!boundSocket && boundSocket.connected && !boundSocket.disconnected;
+    if (p && p.socketId && boundAlive && p.socketId !== socket.id) return null;
+    if (p && (!p.socketId || !boundAlive)) {
+      p.socketId = socket.id;
+      p.disconnectedAt = null;
+      socket.join(code);
+      return p.id;
+    }
+  }
+  return null;
+}
+
+function emitToRoomAndPlayers(code, entry, event, payload) {
+  io.to(code).emit(event, payload);
+  const sent = new Set();
+  for (const p of entry.room.players || []) {
+    if (!p?.socketId) continue;
+    if (sent.has(p.socketId)) continue;
+    sent.add(p.socketId);
+    io.to(p.socketId).emit(event, payload);
+  }
+}
+
 function emitRoomState(roomCode) {
   const entry = rooms.get(roomCode);
   if (!entry) return;
-  io.to(roomCode).emit("game:state", entry.room.game.toClientState());
+  const state = entry.room.game.toClientState();
+  emitToRoomAndPlayers(roomCode, entry, "game:state", state);
 }
 
 function pushEffectsAndState(roomCode) {
   const entry = rooms.get(roomCode);
   if (!entry) return;
   const state = entry.room.game.toClientState();
-  io.to(roomCode).emit("game:state", state);
+  emitToRoomAndPlayers(roomCode, entry, "game:state", state);
   entry.room.game.clearTransientEffects();
 }
 
 io.on("connection", (socket) => {
+  socket.on("lobby:resume", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const room = entry.room;
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) return cb?.({ ok: false, error: "Player not found" });
+
+    // Rebind this player to the new socket id.
+    player.socketId = socket.id;
+    player.disconnectedAt = null;
+    socket.join(code);
+    entry.socketsByPlayerId.set(player.id, socket.id);
+
+    cb?.({ ok: true, code, playerId: player.id, color: player.color });
+    emitToRoomAndPlayers(code, entry, "lobby:message", { text: `${player.name} reconnected.` });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("lobby:leave", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const room = entry.room;
+    const pid = getOrRebindPlayerId({ code, room, socket, playerId }) || playerId;
+    const player = room.players.find((p) => p.id === pid);
+    if (!player) return cb?.({ ok: false, error: "Not in this lobby" });
+
+    emitToRoomAndPlayers(code, entry, "lobby:message", { text: `${player.name} left the lobby.` });
+    emitToRoomAndPlayers(code, entry, "lobby:closed", { reason: "A player left the lobby." });
+
+    rooms.delete(code);
+    cb?.({ ok: true });
+  });
+
   socket.on("lobby:create", ({ name } = {}, cb) => {
     const code = createLobbyCode((c) => rooms.has(c));
     const room = createRoom(code);
@@ -71,8 +140,9 @@ io.on("connection", (socket) => {
     const entry = rooms.get(code);
     if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
     const game = entry.room.game;
-    const pid = getPlayerIdFromSocket(entry.room, socket.id);
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    entry.socketsByPlayerId.set(pid, socket.id);
     const moves = game.getLegalDestinations(pid, from);
     cb?.({ ok: true, from, to: moves });
   });
@@ -81,8 +151,9 @@ io.on("connection", (socket) => {
     const entry = rooms.get(code);
     if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
     const game = entry.room.game;
-    const pid = getPlayerIdFromSocket(entry.room, socket.id);
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    entry.socketsByPlayerId.set(pid, socket.id);
     const res = game.tryMove(pid, { from, to, promotion });
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
@@ -93,8 +164,9 @@ io.on("connection", (socket) => {
     const entry = rooms.get(code);
     if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
     const game = entry.room.game;
-    const pid = getPlayerIdFromSocket(entry.room, socket.id);
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    entry.socketsByPlayerId.set(pid, socket.id);
     const res = game.chooseRule(pid, ruleId);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
@@ -107,13 +179,17 @@ io.on("connection", (socket) => {
       const player = room.players.find((p) => p.socketId === socket.id);
       if (!player) continue;
 
-      leaveRoom(room, player.id);
+      // Don't immediately remove the player; allow reconnects.
+      player.socketId = null;
+      player.disconnectedAt = Date.now();
       entry.socketsByPlayerId.delete(player.id);
-      io.to(code).emit("lobby:message", { text: `${player.name} disconnected.` });
+      emitToRoomAndPlayers(code, entry, "lobby:message", { text: `${player.name} disconnected.` });
       pushEffectsAndState(code);
 
-      // If empty, remove the room.
-      if (room.players.length === 0) rooms.delete(code);
+      // If everyone is gone for a while, remove the room.
+      const allGone = room.players.length > 0 && room.players.every((p) => !p.socketId);
+      const oldestGoneAt = Math.min(...room.players.map((p) => p.disconnectedAt || Date.now()));
+      if (allGone && Date.now() - oldestGoneAt > 2 * 60_000) rooms.delete(code);
     }
   });
 });

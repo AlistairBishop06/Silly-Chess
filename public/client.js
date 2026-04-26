@@ -10,6 +10,7 @@ const els = {
   joinBtn: document.getElementById("joinBtn"),
   lobbyPanel: document.getElementById("lobbyPanel"),
   gamePanel: document.getElementById("gamePanel"),
+  leaveBtn: document.getElementById("leaveBtn"),
   lobbyCode: document.getElementById("lobbyCode"),
   youInfo: document.getElementById("youInfo"),
   turnInfo: document.getElementById("turnInfo"),
@@ -39,6 +40,48 @@ const state = {
   lastEffectsSeen: new Set(),
   lastChoiceKey: null,
 };
+
+function resetToLobby(reason) {
+  if (reason) logLine(`<strong>Lobby</strong>: ${escapeHtml(reason)}`);
+  state.lobby = null;
+  state.playerId = null;
+  state.color = null;
+  state.serverState = null;
+  state.selected = null;
+  state.legalTo = null;
+  state.lastChoiceKey = null;
+  state.lastEffectsSeen = new Set();
+  saveSession();
+  syncUI();
+}
+
+function loadSession() {
+  try {
+    const raw = localStorage.getItem("chaosChessSession");
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s || typeof s !== "object") return;
+    if (typeof s.lobby === "string") state.lobby = s.lobby;
+    if (typeof s.playerId === "string") state.playerId = s.playerId;
+    if (s.color === "w" || s.color === "b") state.color = s.color;
+  } catch {
+    // ignore
+  }
+}
+
+function saveSession() {
+  try {
+    if (!state.lobby || !state.playerId || !state.color) {
+      localStorage.removeItem("chaosChessSession");
+      return;
+    }
+    localStorage.setItem("chaosChessSession", JSON.stringify({ lobby: state.lobby, playerId: state.playerId, color: state.color }));
+  } catch {
+    // ignore
+  }
+}
+
+loadSession();
 
 function logLine(html) {
   const div = document.createElement("div");
@@ -466,6 +509,7 @@ function syncUI() {
   const opp = players.find((p) => p.id !== state.playerId);
   const oppText = opp ? `${opp.name} (${opp.color === "w" ? "White" : "Black"})` : "Waiting for opponent…";
   els.gameMsg.textContent = s.check ? `${s.check} in check · ${oppText}` : oppText;
+
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
   renderCards();
   renderChoice();
@@ -495,10 +539,32 @@ function setConnectedUI() {
 socket.on("connect", () => {
   state.connected = true;
   setConnectedUI();
+
+  // Auto-resume if we were in a lobby and the socket reconnected (socket.id changes).
+  if (state.lobby && state.playerId) {
+    socket.emit("lobby:resume", { code: state.lobby, playerId: state.playerId }, (res) => {
+      if (!res?.ok) {
+        logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "resume failed")}`);
+        state.lobby = null;
+        state.playerId = null;
+        state.color = null;
+        state.serverState = null;
+        saveSession();
+        syncUI();
+        return;
+      }
+      // Server will push a fresh game:state after resume.
+      logLine(`<strong>Lobby</strong>: Reconnected to <strong>${escapeHtml(state.lobby)}</strong>`);
+    });
+  }
 });
 socket.on("disconnect", () => {
   state.connected = false;
   setConnectedUI();
+});
+
+socket.on("lobby:closed", (m) => {
+  resetToLobby(m?.reason || "Lobby closed.");
 });
 
 socket.on("lobby:message", (m) => {
@@ -517,6 +583,7 @@ els.createBtn.addEventListener("click", () => {
     state.lobby = res.code;
     state.playerId = res.playerId;
     state.color = res.color;
+    saveSession();
     els.code.value = "";
     logLine(`<strong>Lobby</strong>: Created <strong>${res.code}</strong>`);
   });
@@ -529,7 +596,16 @@ els.joinBtn.addEventListener("click", () => {
     state.lobby = res.code;
     state.playerId = res.playerId;
     state.color = res.color;
+    saveSession();
     logLine(`<strong>Lobby</strong>: Joined <strong>${res.code}</strong>`);
+  });
+});
+
+els.leaveBtn?.addEventListener("click", () => {
+  if (!state.lobby || !state.playerId) return resetToLobby();
+  socket.emit("lobby:leave", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "leave failed")}`);
+    resetToLobby("Left lobby.");
   });
 });
 

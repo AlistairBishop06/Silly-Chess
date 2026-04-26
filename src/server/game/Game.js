@@ -51,6 +51,9 @@ class Game {
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
 
+    this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 3));
+    this.ruleChoiceDurationMs = Math.max(5_000, Number(process.env.RULE_CHOICE_DURATION_MS || 30_000));
+
     this.effects = [];
     this.effectSeq = 1;
 
@@ -166,13 +169,13 @@ class Game {
 
   maybeStartRuleChoice() {
     if (!this.started || this.result) return;
-    // Every 3 combined turns (ply), trigger a choice after the move resolves.
-    if (this.ply > 0 && this.ply % 10 === 0) {
+    // Every N combined turns (ply), trigger a choice after the move resolves.
+    if (this.ply > 0 && this.ply % this.ruleChoiceEveryPlies === 0) {
       this.phase = "ruleChoice";
       this.ruleChoicesByPlayerId = {};
       this.ruleChosenByPlayerId = {};
       for (const p of this.players) this.ruleChoicesByPlayerId[p.id] = this.ruleManager.randomChoices(3);
-      this.ruleChoiceDeadlineMs = Date.now() + 30_000;
+      this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;
       this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rule choice time!" });
     }
   }
