@@ -39,6 +39,8 @@ const state = {
   particles: [],
   lastEffectsSeen: new Set(),
   lastChoiceKey: null,
+  lastStateAt: 0,
+  lastSyncAt: 0,
 };
 
 function resetToLobby(reason) {
@@ -484,6 +486,8 @@ function renderChoice() {
     div.addEventListener("click", () => {
       socket.emit("game:chooseRule", { code: state.lobby, playerId: state.playerId, ruleId: r.id }, (res) => {
         if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "rule pick failed")}`);
+        // If a push was missed, pull state directly.
+        socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
       });
     });
     els.choiceCards.appendChild(div);
@@ -573,6 +577,7 @@ socket.on("lobby:message", (m) => {
 
 socket.on("game:state", (s) => {
   state.serverState = s;
+  state.lastStateAt = Date.now();
   handleEffects();
   syncUI();
 });
@@ -655,3 +660,13 @@ setInterval(() => {
   if (!state.serverState) return;
   updateChoiceTimer();
 }, 250);
+
+// Fallback sync: if we haven't seen a state update recently, request one.
+setInterval(() => {
+  if (!state.connected || !state.lobby || !state.playerId) return;
+  const now = Date.now();
+  if (now - state.lastStateAt < 1500) return;
+  if (now - state.lastSyncAt < 1500) return;
+  state.lastSyncAt = now;
+  socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+}, 500);

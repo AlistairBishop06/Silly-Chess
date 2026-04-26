@@ -55,6 +55,15 @@ function emitToRoomAndPlayers(code, entry, event, payload) {
   }
 }
 
+function touchPlayerSocket({ code, entry, playerId, socket }) {
+  const p = entry.room.players.find((pl) => pl.id === playerId);
+  if (!p) return;
+  p.socketId = socket.id;
+  p.disconnectedAt = null;
+  socket.join(code);
+  entry.socketsByPlayerId.set(p.id, socket.id);
+}
+
 function emitRoomState(roomCode) {
   const entry = rooms.get(roomCode);
   if (!entry) return;
@@ -71,6 +80,17 @@ function pushEffectsAndState(roomCode) {
 }
 
 io.on("connection", (socket) => {
+  socket.on("game:sync", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    // Emit directly to this socket as a fallback when a room broadcast was missed.
+    io.to(socket.id).emit("game:state", entry.room.game.toClientState());
+    cb?.({ ok: true });
+  });
+
   socket.on("lobby:resume", ({ code, playerId } = {}, cb) => {
     const entry = rooms.get(code);
     if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
@@ -79,10 +99,7 @@ io.on("connection", (socket) => {
     if (!player) return cb?.({ ok: false, error: "Player not found" });
 
     // Rebind this player to the new socket id.
-    player.socketId = socket.id;
-    player.disconnectedAt = null;
-    socket.join(code);
-    entry.socketsByPlayerId.set(player.id, socket.id);
+    touchPlayerSocket({ code, entry, playerId: player.id, socket });
 
     cb?.({ ok: true, code, playerId: player.id, color: player.color });
     emitToRoomAndPlayers(code, entry, "lobby:message", { text: `${player.name} reconnected.` });
@@ -142,7 +159,7 @@ io.on("connection", (socket) => {
     const game = entry.room.game;
     const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
-    entry.socketsByPlayerId.set(pid, socket.id);
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
     const moves = game.getLegalDestinations(pid, from);
     cb?.({ ok: true, from, to: moves });
   });
@@ -153,7 +170,7 @@ io.on("connection", (socket) => {
     const game = entry.room.game;
     const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
-    entry.socketsByPlayerId.set(pid, socket.id);
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
     const res = game.tryMove(pid, { from, to, promotion });
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
@@ -166,7 +183,7 @@ io.on("connection", (socket) => {
     const game = entry.room.game;
     const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
-    entry.socketsByPlayerId.set(pid, socket.id);
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
     const res = game.chooseRule(pid, ruleId);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
