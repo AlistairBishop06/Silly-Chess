@@ -10,6 +10,7 @@ function ruleTypeLabel(rule) {
 function kindClass(rule) {
   if (rule.kind === "instant") return "instant";
   if (rule.kind === "delayed") return "delayed";
+  if (rule.kind === "duration") return "duration";
   return "duration";
 }
 
@@ -26,13 +27,14 @@ class RuleManager {
         const r = getRuleById(inst.ruleId);
         if (!r) return null;
         const targetSq = inst.data?.targetSq;
+        const kind = inst.kind === "permanent" ? "permanent" : kindClass(r);
         return {
           instanceId: inst.instanceId,
           id: r.id,
           name: r.name,
           description: r.description,
-          kind: kindClass(r),
-          typeLabel: ruleTypeLabel(r),
+          kind,
+          typeLabel: kind === "permanent" ? "Permanent" : ruleTypeLabel(r),
           remaining: inst.kind === "duration" ? inst.remaining : inst.kind === "delayed" ? inst.triggerIn : null,
           targetSq: typeof targetSq === "number" ? targetSq : null,
         };
@@ -48,7 +50,9 @@ class RuleManager {
     for (const inst of this.active) {
       const r = getRuleById(inst.ruleId);
       if (!r) continue;
-      if (inst.kind === "duration" && typeof r.modifiers === "function") Object.assign(mods, r.modifiers(this.game));
+      if ((inst.kind === "duration" || inst.kind === "permanent") && typeof r.modifiers === "function") {
+        Object.assign(mods, r.modifiers(this.game));
+      }
     }
     return mods;
   }
@@ -82,6 +86,9 @@ class RuleManager {
     if (r.kind === "instant") {
       this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: r.name });
       r.apply?.(this.game, { flags: {} });
+      if (r.permanentCard) {
+        this.active.push({ instanceId: `P${this.instanceSeq++}`, ruleId: r.id, kind: "permanent", remaining: null, triggerIn: null, data: {} });
+      }
       return { ok: true, applied: "instant" };
     }
 
@@ -110,11 +117,21 @@ class RuleManager {
     for (const inst of this.active) {
       const r = getRuleById(inst.ruleId);
       if (!r) continue;
+      if (inst.kind === "permanent") {
+        still.push(inst);
+        continue;
+      }
       if (inst.kind === "delayed") {
         inst.triggerIn -= 1;
         if (inst.triggerIn <= 0) {
           this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} triggers!` });
           r.apply?.(this.game, { flags: {}, inst });
+          if (r.becomesPermanent) {
+            inst.kind = "permanent";
+            inst.remaining = null;
+            inst.triggerIn = null;
+            still.push(inst);
+          }
           continue;
         }
         still.push(inst);

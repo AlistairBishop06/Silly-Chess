@@ -393,14 +393,17 @@ canvas {
 .card.instant .name { color: #ff8fb1; }
 .card.delayed .name { color: #ffe58f; }
 .card.duration .name { color: #8fffd8; }
+.card.permanent .name { color: #caa6ff; }
 
 .card.instant { --card-accent: rgba(255, 143, 177, 0.55); }
 .card.delayed { --card-accent: rgba(255, 229, 143, 0.55); }
 .card.duration { --card-accent: rgba(143, 255, 216, 0.55); }
+.card.permanent { --card-accent: rgba(202, 166, 255, 0.55); }
 
 .card.instant .cardTypeIcon { border-color: rgba(255, 143, 177, 0.40); }
 .card.delayed .cardTypeIcon { border-color: rgba(255, 229, 143, 0.38); }
 .card.duration .cardTypeIcon { border-color: rgba(143, 255, 216, 0.40); }
+.card.permanent .cardTypeIcon { border-color: rgba(202, 166, 255, 0.40); }
 
 .card.pickable::before {
   background:

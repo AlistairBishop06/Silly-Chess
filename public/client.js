@@ -340,6 +340,7 @@ function renderCards() {
 function ruleTypeIcon(kind) {
   if (kind === "instant") return "⚡";
   if (kind === "delayed") return "⏳";
+  if (kind === "permanent") return "∞";
   return "⏱";
 }
 

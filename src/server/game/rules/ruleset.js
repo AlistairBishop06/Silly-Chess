@@ -402,6 +402,7 @@ const RULES = [
     delayTurns: 6,
     name: "Black Hole",
     description: "In 6 turns, a random square becomes deadly (deletes anything that enters it).",
+    becomesPermanent: true,
     onSchedule(game, inst) {
       const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i));
       inst.data.targetSq = candidates[randInt(candidates.length)];
@@ -460,6 +461,7 @@ const RULES = [
     delayTurns: 5,
     name: "Board Shrink",
     description: "In 5 turns, the outer ring becomes deadly.",
+    becomesPermanent: true,
     apply(game) {
       for (let f = 0; f < 8; f++) {
         game.hazards.deadly.add(toIdx(f, 0));
@@ -520,6 +522,7 @@ const RULES = [
     delayTurns: 4,
     name: "Gravity On",
     description: "In 4 turns, gravity activates (pieces fall downward each turn).",
+    becomesPermanent: true,
     apply(game) {
       game.permanent.gravity = true;
     },
@@ -530,6 +533,7 @@ const RULES = [
     delayTurns: 6,
     name: "Wrap Edges",
     description: "In 6 turns, edges wrap permanently.",
+    becomesPermanent: true,
     apply(game) {
       game.permanent.wrapEdges = true;
     },
@@ -555,6 +559,7 @@ const RULES = [
     delayTurns: 5,
     name: "Bishop Upgrade",
     description: "In 5 turns, bishops gain rook movement permanently.",
+    becomesPermanent: true,
     apply(game) {
       game.permanent.bishopsRookLike = true;
     },
@@ -565,6 +570,7 @@ const RULES = [
     delayTurns: 4,
     name: "March of Kings",
     description: "In 4 turns, kings are forced to move every turn.",
+    becomesPermanent: true,
     apply(game) {
       game.permanent.forcedKingMove = true;
     },
@@ -575,6 +581,7 @@ const RULES = [
     delayTurns: 6,
     name: "Lava Fields",
     description: "In 6 turns, random squares become lava.",
+    becomesPermanent: true,
     apply(game) {
       const squares = pickN([...Array(64).keys()].filter((i) => !game.missingSquares.has(i)), 10);
       for (const sq of squares) game.hazards.lava.add(sq);
@@ -586,6 +593,7 @@ const RULES = [
     delayTurns: 3,
     name: "Chain Explosions",
     description: "In 3 turns, all captures trigger chain explosions.",
+    becomesPermanent: true,
     apply(game) {
       game.permanent.chainExplosions = true;
     },
@@ -606,6 +614,7 @@ const RULES = [
     delayTurns: 4,
     name: "Tiny Steps",
     description: "In 4 turns, all pieces move like kings (permanent).",
+    becomesPermanent: true,
     apply(game) {
       game.permanent.allPiecesKingLike = true;
     },
