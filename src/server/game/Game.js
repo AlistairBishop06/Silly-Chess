@@ -38,21 +38,30 @@ function deepCloneState(game) {
 class Game {
   constructor({ roomCode }) {
     this.roomCode = roomCode;
+    this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 3));
+    this.ruleChoiceDurationMs = Math.max(5_000, Number(process.env.RULE_CHOICE_DURATION_MS || 30_000));
+
+    this.initMatchState();
+  }
+
+  initMatchState() {
     this.started = false;
     this.players = []; // {id,name,color}
 
     this.state = initialState();
     this.ply = 0;
     this.phase = "lobby"; // "lobby" | "play" | "ruleChoice"
-    this.result = null;
+
+    this.result = null; // backwards-compatible summary string
+    this.resultInfo = null; // { winner, loser, reason, detail }
+
+    this.readyByPlayerId = {};
+    this.rematchId = (this.rematchId || 0) + 1;
 
     this.ruleManager = new RuleManager(this);
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
-
-    this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 3));
-    this.ruleChoiceDurationMs = Math.max(5_000, Number(process.env.RULE_CHOICE_DURATION_MS || 30_000));
 
     this.effects = [];
     this.effectSeq = 1;
@@ -105,6 +114,9 @@ class Game {
     this.started = true;
     this.players = players.map((p) => ({ id: p.id, name: p.name, color: p.color }));
     this.phase = "play";
+    this.result = null;
+    this.resultInfo = null;
+    this.readyByPlayerId = {};
     this.effects.push({ type: "log", id: this.nextEffectId(), text: "Game started." });
   }
 
@@ -165,6 +177,7 @@ class Game {
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
     this.phase = "play";
+    this.evaluateGameEnd();
   }
 
   maybeStartRuleChoice() {
@@ -192,6 +205,83 @@ class Game {
     }
     this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rule choice timed out; auto-picked." });
     this.applyChosenRulesAndResume();
+  }
+
+  findKingSquare(color) {
+    for (let i = 0; i < 64; i++) {
+      const p = this.state.board[i];
+      if (p && p.color === color && p.type === "k") return i;
+    }
+    return null;
+  }
+
+  setResult({ winner, loser, reason, detail }) {
+    this.resultInfo = { winner, loser, reason, detail };
+    const winnerName = winner === "w" ? "White" : "Black";
+    const loserName = loser === "w" ? "White" : "Black";
+    this.result = `${winnerName} wins (${loserName} ${reason === "checkmate" ? "checkmated" : "lost"}).`;
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: detail || this.result });
+  }
+
+  evaluateGameEnd() {
+    if (this.resultInfo || this.result) return true;
+    if (!this.started || this.phase === "lobby") return false;
+
+    const wKing = this.findKingSquare("w");
+    const bKing = this.findKingSquare("b");
+    if (wKing == null || bKing == null) {
+      const loser = wKing == null ? "w" : "b";
+      const winner = loser === "w" ? "b" : "w";
+      const loserName = loser === "w" ? "White" : "Black";
+      this.setResult({
+        winner,
+        loser,
+        reason: "king_deleted",
+        detail: `${loserName}'s king was destroyed or deleted by a rule.`,
+      });
+      return true;
+    }
+
+    // If side to move has no legal moves, they lose (checkmate OR rule lock).
+    const color = this.state.turn;
+    const mods = this.currentModifiers();
+    const legal = generateLegalMoves(this.state, color, mods);
+    if (legal.length === 0) {
+      const inCheck = require("./ChessEngine").isInCheck(this.state, color, mods);
+      const loser = color;
+      const winner = other(color);
+      const loserName = loser === "w" ? "White" : "Black";
+      const winnerName = winner === "w" ? "White" : "Black";
+      this.setResult({
+        winner,
+        loser,
+        reason: inCheck ? "checkmate" : "no_moves",
+        detail: inCheck
+          ? `${winnerName} wins by checkmate: ${loserName} has no legal moves while in check.`
+          : `${winnerName} wins: ${loserName} has no legal moves (blocked by rules/position).`,
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  toggleReady(playerId) {
+    if (!this.resultInfo) return { ok: false, error: "Game is not over" };
+    if (!this.players.some((p) => p.id === playerId)) return { ok: false, error: "Unknown player" };
+    this.readyByPlayerId[playerId] = !this.readyByPlayerId[playerId];
+
+    const allReady = this.players.length > 0 && this.players.every((p) => !!this.readyByPlayerId[p.id]);
+    if (allReady) {
+      const players = [...this.players];
+      this.initMatchState();
+      this.started = true;
+      this.players = players;
+      this.phase = "play";
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rematch started." });
+    }
+
+    return { ok: true, allReady };
   }
 
   applyHazardsAfterMove(toSquare) {
@@ -500,15 +590,8 @@ class Game {
     // Tick rules after ply.
     this.ruleManager.tickAfterPly();
 
-    // Check game end.
-    const nextColor = this.state.turn;
-    const endMods = this.currentModifiers();
-    const nextLegal = generateLegalMoves(this.state, nextColor, endMods);
-    const inCheck = require("./ChessEngine").isInCheck(this.state, nextColor, endMods);
-    if (nextLegal.length === 0) {
-      this.result = inCheck ? `${nextColor === "w" ? "White" : "Black"} is checkmated.` : "Stalemate.";
-      this.effects.push({ type: "log", id: this.nextEffectId(), text: this.result });
-    }
+    // Check game end (checkmate, king deleted, or rule lock).
+    this.evaluateGameEnd();
 
     this.maybeStartRuleChoice();
     return { ok: true };
@@ -537,6 +620,7 @@ class Game {
     };
 
     return {
+      roomCode: this.roomCode,
       started: this.started,
       players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color })),
       board: serializeBoard(this.state.board),
@@ -550,6 +634,8 @@ class Game {
       ruleChosenByPlayerId: this.ruleChosenByPlayerId,
       ruleChoiceDeadlineMs: this.ruleChoiceDeadlineMs,
       effects: this.effects,
+      readyByPlayerId: this.readyByPlayerId,
+      rematchId: this.rematchId,
       hazards,
       marks,
       missingSquares: [...this.missingSquares],
@@ -558,6 +644,7 @@ class Game {
       invisiblePieces: !!mods.invisiblePieces,
       visibleSquares: visibleSquares ? [...visibleSquares] : null,
       lastMove: this.state.lastMove || null,
+      resultInfo: this.resultInfo,
     };
   }
 }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chaos Chess (Multiplayer)</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=20260426" />
   </head>
   <body>
     <div id="app">
@@ -69,6 +69,18 @@
               </div>
               <div id="choiceCards" class="cards choice"></div>
             </div>
+
+            <div id="resultModal" class="modal" hidden>
+              <canvas id="confetti" class="confetti"></canvas>
+              <div class="modalCard">
+                <div id="resultTitle" class="modalTitle">Game Over</div>
+                <div id="resultDetail" class="modalDetail">—</div>
+                <div id="readyStatus" class="modalStatus">—</div>
+                <div class="modalActions">
+                  <button id="readyBtn" type="button">Ready</button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -84,7 +96,7 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="client.js"></script>
+    <script src="client.js?v=20260426"></script>
   </body>
 </html>
 

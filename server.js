@@ -7,7 +7,15 @@ const { createLobbyCode, createRoom, getRoom, joinRoom, leaveRoom } = require(".
 const { Game } = require("./src/server/game/Game");
 
 const app = express();
-app.use(express.static(path.join(__dirname, "public")));
+app.use(
+  express.static(path.join(__dirname, "public"), {
+    etag: false,
+    lastModified: false,
+    setHeaders(res) {
+      res.setHeader("Cache-Control", "no-store");
+    },
+  })
+);
 
 const server = http.createServer(app);
 const io = new Server(server);
@@ -187,6 +195,19 @@ io.on("connection", (socket) => {
     const res = game.chooseRule(pid, ruleId);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:ready", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.toggleReady(pid);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true, allReady: res.allReady });
     pushEffectsAndState(code);
   });
 

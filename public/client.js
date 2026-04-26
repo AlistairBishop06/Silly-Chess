@@ -11,6 +11,12 @@ const els = {
   lobbyPanel: document.getElementById("lobbyPanel"),
   gamePanel: document.getElementById("gamePanel"),
   leaveBtn: document.getElementById("leaveBtn"),
+  resultModal: document.getElementById("resultModal"),
+  resultTitle: document.getElementById("resultTitle"),
+  resultDetail: document.getElementById("resultDetail"),
+  readyStatus: document.getElementById("readyStatus"),
+  readyBtn: document.getElementById("readyBtn"),
+  confetti: document.getElementById("confetti"),
   lobbyCode: document.getElementById("lobbyCode"),
   youInfo: document.getElementById("youInfo"),
   turnInfo: document.getElementById("turnInfo"),
@@ -41,7 +47,89 @@ const state = {
   lastChoiceKey: null,
   lastStateAt: 0,
   lastSyncAt: 0,
+  lastRematchId: null,
 };
+
+const confetti = {
+  running: false,
+  parts: [],
+  raf: 0,
+};
+
+function stopConfetti() {
+  confetti.running = false;
+  confetti.parts = [];
+  if (confetti.raf) cancelAnimationFrame(confetti.raf);
+  confetti.raf = 0;
+  const c = els.confetti;
+  if (c) {
+    const g = c.getContext("2d");
+    g.clearRect(0, 0, c.width, c.height);
+  }
+}
+
+function startConfetti() {
+  const c = els.confetti;
+  if (!c) return;
+
+  const resize = () => {
+    const rect = c.getBoundingClientRect();
+    c.width = Math.max(1, Math.floor(rect.width * devicePixelRatio));
+    c.height = Math.max(1, Math.floor(rect.height * devicePixelRatio));
+  };
+  resize();
+  window.addEventListener("resize", resize, { passive: true });
+
+  const colors = ["#7bd3ff", "#7dffb3", "#ffe58f", "#ff8fb1", "#caa6ff"];
+  const g = c.getContext("2d");
+  confetti.parts = [];
+  for (let i = 0; i < 140; i++) {
+    confetti.parts.push({
+      x: Math.random() * c.width,
+      y: -Math.random() * c.height,
+      vx: (Math.random() - 0.5) * 220,
+      vy: 160 + Math.random() * 360,
+      r: 6 + Math.random() * 10,
+      a: Math.random() * Math.PI * 2,
+      va: (Math.random() - 0.5) * 6,
+      color: colors[i % colors.length],
+    });
+  }
+  confetti.running = true;
+
+  let last = performance.now();
+  const tick = (t) => {
+    if (!confetti.running) return;
+    const dt = Math.min(0.05, (t - last) / 1000);
+    last = t;
+
+    g.clearRect(0, 0, c.width, c.height);
+    for (const p of confetti.parts) {
+      p.x += p.vx * dt * devicePixelRatio;
+      p.y += p.vy * dt * devicePixelRatio;
+      p.a += p.va * dt;
+      p.vy += 40 * dt * devicePixelRatio;
+
+      if (p.y > c.height + 30 * devicePixelRatio) {
+        p.y = -20 * devicePixelRatio;
+        p.x = Math.random() * c.width;
+        p.vy = 160 + Math.random() * 360;
+      }
+
+      g.save();
+      g.translate(p.x, p.y);
+      g.rotate(p.a);
+      g.fillStyle = p.color;
+      g.globalAlpha = 0.9;
+      g.fillRect(-p.r, -p.r * 0.45, p.r * 2, p.r * 0.9);
+      g.restore();
+    }
+
+    confetti.raf = requestAnimationFrame(tick);
+  };
+
+  confetti.raf = requestAnimationFrame(tick);
+}
 
 function resetToLobby(reason) {
   if (reason) logLine(`<strong>Lobby</strong>: ${escapeHtml(reason)}`);
@@ -53,8 +141,31 @@ function resetToLobby(reason) {
   state.legalTo = null;
   state.lastChoiceKey = null;
   state.lastEffectsSeen = new Set();
+  state.lastRematchId = null;
+  state.lastStateAt = 0;
+  state.lastSyncAt = 0;
+  stopConfetti();
   saveSession();
   syncUI();
+}
+
+function enterLobby({ code, playerId, color }) {
+  state.lobby = code;
+  state.playerId = playerId;
+  state.color = color;
+  state.serverState = null;
+  state.selected = null;
+  state.legalTo = null;
+  state.lastChoiceKey = null;
+  state.lastEffectsSeen = new Set();
+  state.lastRematchId = null;
+  state.lastStateAt = 0;
+  state.lastSyncAt = 0;
+  stopConfetti();
+  if (els.resultModal) els.resultModal.hidden = true;
+  saveSession();
+  syncUI();
+  socket.emit("game:sync", { code, playerId });
 }
 
 function loadSession() {
@@ -506,6 +617,19 @@ function syncUI() {
   els.gamePanel.hidden = !connected;
   if (!connected) return;
 
+  if (!s) {
+    els.lobbyCode.textContent = state.lobby;
+    els.youInfo.textContent = `${state.color === "w" ? "White" : "Black"} (${state.playerId})`;
+    els.turnInfo.textContent = "—";
+    els.plyInfo.textContent = "0";
+    els.gameMsg.textContent = "Syncing…";
+    els.activeCards.innerHTML = "";
+    els.choiceArea.hidden = true;
+    if (els.resultModal) els.resultModal.hidden = true;
+    stopConfetti();
+    return;
+  }
+
   els.lobbyCode.textContent = state.lobby;
   els.youInfo.textContent = `${state.color === "w" ? "White" : "Black"} (${state.playerId})`;
   els.turnInfo.textContent = s.turn === "w" ? "White" : "Black";
@@ -518,6 +642,37 @@ function syncUI() {
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
   renderCards();
   renderChoice();
+
+  // Result modal.
+  const ri = s.resultInfo;
+  const showResult =
+    !!ri &&
+    (ri.winner === "w" || ri.winner === "b") &&
+    (ri.loser === "w" || ri.loser === "b") &&
+    !!s.started &&
+    s.phase !== "lobby";
+  if (els.resultModal) els.resultModal.hidden = !showResult;
+  if (showResult) {
+    const youWon = ri.winner === state.color;
+    if (els.resultTitle) els.resultTitle.textContent = youWon ? "You Win" : "You Lose";
+    if (els.resultDetail) els.resultDetail.textContent = ri.detail || "";
+
+    const readyBy = s.readyByPlayerId || {};
+    const readyCount = Object.values(readyBy).filter(Boolean).length;
+    const total = (s.players || []).length || 2;
+    if (els.readyStatus) els.readyStatus.textContent = `Ready: ${readyCount}/${total}`;
+
+    const youReady = !!readyBy[state.playerId];
+    if (els.readyBtn) els.readyBtn.textContent = youReady ? "Unready" : "Ready";
+
+    if (youWon) {
+      if (!confetti.running) startConfetti();
+    } else {
+      stopConfetti();
+    }
+  } else {
+    stopConfetti();
+  }
 }
 
 function handleEffects() {
@@ -554,12 +709,14 @@ socket.on("connect", () => {
         state.playerId = null;
         state.color = null;
         state.serverState = null;
+        state.lastRematchId = null;
         saveSession();
         syncUI();
         return;
       }
       // Server will push a fresh game:state after resume.
       logLine(`<strong>Lobby</strong>: Reconnected to <strong>${escapeHtml(state.lobby)}</strong>`);
+      socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
     });
   }
 });
@@ -577,6 +734,15 @@ socket.on("lobby:message", (m) => {
 });
 
 socket.on("game:state", (s) => {
+  // The server can send pushes for rooms this socket is still subscribed to.
+  // Only accept state for the currently active lobby.
+  if (state.lobby && s?.roomCode && s.roomCode !== state.lobby) return;
+  if (state.lastRematchId != null && s.rematchId != null && s.rematchId !== state.lastRematchId) {
+    state.lastEffectsSeen = new Set();
+    state.lastChoiceKey = null;
+    stopConfetti();
+  }
+  state.lastRematchId = s.rematchId ?? state.lastRematchId;
   state.serverState = s;
   state.lastStateAt = Date.now();
   handleEffects();
@@ -586,10 +752,7 @@ socket.on("game:state", (s) => {
 els.createBtn.addEventListener("click", () => {
   socket.emit("lobby:create", { name: els.name.value.trim() }, (res) => {
     if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "create failed")}`);
-    state.lobby = res.code;
-    state.playerId = res.playerId;
-    state.color = res.color;
-    saveSession();
+    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
     els.code.value = "";
     logLine(`<strong>Lobby</strong>: Created <strong>${res.code}</strong>`);
   });
@@ -599,10 +762,7 @@ els.joinBtn.addEventListener("click", () => {
   const code = els.code.value.trim().toUpperCase();
   socket.emit("lobby:join", { code, name: els.name.value.trim() }, (res) => {
     if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "join failed")}`);
-    state.lobby = res.code;
-    state.playerId = res.playerId;
-    state.color = res.color;
-    saveSession();
+    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
     logLine(`<strong>Lobby</strong>: Joined <strong>${res.code}</strong>`);
   });
 });
@@ -612,7 +772,14 @@ els.leaveBtn?.addEventListener("click", () => {
   socket.emit("lobby:leave", { code: state.lobby, playerId: state.playerId }, (res) => {
     if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "leave failed")}`);
     resetToLobby("Left lobby.");
-    window.location.reload();
+  });
+});
+
+els.readyBtn?.addEventListener("click", () => {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:ready", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "ready failed")}`);
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
   });
 });
 
