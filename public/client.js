@@ -606,6 +606,7 @@ els.leaveBtn?.addEventListener("click", () => {
   socket.emit("lobby:leave", { code: state.lobby, playerId: state.playerId }, (res) => {
     if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "leave failed")}`);
     resetToLobby("Left lobby.");
+    window.location.reload();
   });
 });
 
