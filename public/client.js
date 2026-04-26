@@ -466,7 +466,6 @@ function syncUI() {
   const opp = players.find((p) => p.id !== state.playerId);
   const oppText = opp ? `${opp.name} (${opp.color === "w" ? "White" : "Black"})` : "Waiting for opponent…";
   els.gameMsg.textContent = s.check ? `${s.check} in check · ${oppText}` : oppText;
-
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
   renderCards();
   renderChoice();
