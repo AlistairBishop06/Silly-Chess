@@ -46,7 +46,7 @@ const HILL_PROMOTION = { p: "n", n: "b", b: "r", r: "q", q: "q" };
 class Game {
   constructor({ roomCode }) {
     this.roomCode = roomCode;
-    this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 10));
+    this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 7));
     this.ruleChoiceDurationMs = Math.max(5_000, Number(process.env.RULE_CHOICE_DURATION_MS || 30_000));
 
     this.initMatchState();
