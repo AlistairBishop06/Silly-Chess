@@ -35,6 +35,14 @@ function deepCloneState(game) {
   };
 }
 
+const CORNER_SQUARES = new Set([0, 7, 56, 63]); // a1, h1, a8, h8
+
+const HILL_SQUARES = new Set([
+  toIdx(3, 3), toIdx(4, 3), toIdx(3, 4), toIdx(4, 4),
+]);
+
+const HILL_PROMOTION = { p: "n", n: "b", b: "r", r: "q", q: "q" };
+
 class Game {
   constructor({ roomCode }) {
     this.roomCode = roomCode;
@@ -52,8 +60,8 @@ class Game {
     this.ply = 0;
     this.phase = "lobby"; // "lobby" | "play" | "ruleChoice"
 
-    this.result = null; // backwards-compatible summary string
-    this.resultInfo = null; // { winner, loser, reason, detail }
+    this.result = null;
+    this.resultInfo = null;
 
     this.readyByPlayerId = {};
     this.rematchId = (this.rematchId || 0) + 1;
@@ -67,6 +75,8 @@ class Game {
     this.effectSeq = 1;
 
     this.visualFlipPlies = 0;
+    this.colourBlindPlies = 0;
+    this.asteroidPlies = 0;
     this.extraMoves = { w: 0, b: 0 };
     this.shield = { w: 0, b: 0 };
     this.permanent = {
@@ -78,15 +88,15 @@ class Game {
       chainExplosions: false,
     };
 
-    this.hazards = { deadly: new Set(), lava: new Set() };
+    this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
     this.missingSquares = new Set();
     this.marks = { lightning: new Set() };
 
     this.lastMoveSquares = [];
 
-    this.trailBlocks = []; // squares created by trails rule
+    this.trailBlocks = [];
     this.requestTimeReverse = 0;
-    this.history = []; // snapshots for time reversal
+    this.history = [];
 
     this.onRuleEnded = (ruleId) => {
       if (ruleId === "dur_trails_6") {
@@ -106,7 +116,6 @@ class Game {
   }
 
   clearTransientEffects() {
-    // effects are included in state once; client dedupes.
     this.effects = [];
   }
 
@@ -127,7 +136,6 @@ class Game {
 
   currentModifiers() {
     const mods = this.ruleManager.computeModifiers();
-    // Always pass in missingSquares and shield (shield is consumed during check evaluation).
     mods.missingSquares = this.missingSquares;
     mods.shield = this.shield;
     return mods;
@@ -143,7 +151,6 @@ class Game {
     if (!p || p.color !== color) return [];
 
     const mods = this.currentModifiers();
-    // Mirrored moves: if active, require copying last move if possible.
     if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
     const legal = generateLegalMoves(this.state, color, mods);
     return legal.filter((m) => m.from === from).map((m) => m.to);
@@ -165,7 +172,6 @@ class Game {
   }
 
   applyChosenRulesAndResume() {
-    // Apply in stable order: white then black.
     const white = this.players.find((p) => p.color === "w");
     const black = this.players.find((p) => p.color === "b");
     const ids = [];
@@ -182,7 +188,6 @@ class Game {
 
   maybeStartRuleChoice() {
     if (!this.started || this.result) return;
-    // Every N combined turns (ply), trigger a choice after the move resolves.
     if (this.ply > 0 && this.ply % this.ruleChoiceEveryPlies === 0) {
       this.phase = "ruleChoice";
       this.ruleChoicesByPlayerId = {};
@@ -242,7 +247,6 @@ class Game {
       return true;
     }
 
-    // If side to move has no legal moves, they lose (checkmate OR rule lock).
     const color = this.state.turn;
     const mods = this.currentModifiers();
     const legal = generateLegalMoves(this.state, color, mods);
@@ -285,7 +289,6 @@ class Game {
   }
 
   applyHazardsAfterMove(toSquare) {
-    // Deadly/lava squares destroy pieces that end on them.
     if (this.hazards.deadly.has(toSquare) || this.hazards.lava.has(toSquare)) {
       const p = this.state.board[toSquare];
       if (p && p.color !== "x") {
@@ -293,11 +296,18 @@ class Game {
         this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "hazard" });
       }
     }
+    // Asteroid debris: destroy piece that lands on it, then remove the debris.
+    if (this.hazards.asteroid.has(toSquare)) {
+      const p = this.state.board[toSquare];
+      if (p && p.color !== "x") {
+        this.state.board[toSquare] = null;
+        this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "asteroid" });
+      }
+      this.hazards.asteroid.delete(toSquare);
+    }
   }
 
   applyGravityStep() {
-    // Gravity pulls toward rank 0 (down on the canvas for both players).
-    // One step per ply to keep it playable.
     const moved = [];
     for (let i = 0; i < 64; i++) {
       const p = this.state.board[i];
@@ -310,7 +320,6 @@ class Game {
       if (this.missingSquares.has(to) || this.state.board[to]) continue;
       moved.push({ from: i, to });
     }
-    // Apply bottom-up to avoid cascades in same tick.
     moved.sort((a, b) => idxToRank(a.from) - idxToRank(b.from));
     for (const m of moved) {
       if (!this.state.board[m.from] || this.state.board[m.to]) continue;
@@ -321,7 +330,6 @@ class Game {
   }
 
   applyRandomShift() {
-    // Shift each rank by -1/0/+1 with wrapping (visual chaos, still deterministic server-side).
     const next = Array(64).fill(null);
     for (let r = 0; r < 8; r++) {
       const shift = [-1, 0, 1][Math.floor(Math.random() * 3)];
@@ -336,7 +344,6 @@ class Game {
   }
 
   refreshVanishingTiles() {
-    // Randomly remove ~8 squares, but keep king squares.
     this.missingSquares = new Set();
     const keep = new Set();
     for (let i = 0; i < 64; i++) {
@@ -349,8 +356,82 @@ class Game {
       const sq = candidates.splice(idx, 1)[0];
       this.missingSquares.add(sq);
     }
-    // Pieces on missing squares vanish.
     for (const sq of this.missingSquares) this.state.board[sq] = null;
+  }
+
+  // King of the Hill: promote pieces standing on central squares.
+  applyKingOfHill() {
+    for (const sq of HILL_SQUARES) {
+      const p = this.state.board[sq];
+      if (!p || p.color === "x" || p.type === "k") continue;
+      const next = HILL_PROMOTION[p.type];
+      if (next && next !== p.type) {
+        p.type = next;
+        this.effects.push({ type: "log", id: this.nextEffectId(), text: `King of the Hill: piece at ${String.fromCharCode(97 + idxToFile(sq))}${idxToRank(sq) + 1} promoted to ${next}!` });
+      }
+    }
+  }
+
+  // Echo Chamber: mirror each move across the vertical axis (file 0↔7, 1↔6, etc.)
+  applyEchoChamberMove(from, to) {
+    const mf = 7 - idxToFile(from);
+    const mr = idxToRank(from);
+    const mirrorFrom = toIdx(mf, mr);
+    const mt = 7 - idxToFile(to);
+    const mirrorTo = toIdx(mt, idxToRank(to));
+
+    if (this.missingSquares.has(mirrorFrom) || this.missingSquares.has(mirrorTo)) return;
+
+    const piece = this.state.board[mirrorFrom];
+    if (!piece || piece.color === "x" || piece.type === "k") return;
+
+    // Destroy whatever is on the mirror destination (if enemy or neutral).
+    const target = this.state.board[mirrorTo];
+    if (target && target.type === "k") return; // never destroy a king via echo
+    if (target) {
+      this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [mirrorTo], reason: "echoChamber" });
+    }
+
+    this.state.board[mirrorTo] = { ...piece, moved: true };
+    this.state.board[mirrorFrom] = null;
+  }
+
+  // Teleporter corners: if a piece just landed on a corner, send it somewhere random.
+  applyTeleporterCorner(sq) {
+    if (!CORNER_SQUARES.has(sq)) return;
+    const p = this.state.board[sq];
+    if (!p || p.color === "x") return;
+
+    const empties = [];
+    for (let i = 0; i < 64; i++) {
+      if (!this.state.board[i] && !this.missingSquares.has(i) && !CORNER_SQUARES.has(i)) empties.push(i);
+    }
+    if (!empties.length) return;
+
+    const dest = empties[Math.floor(Math.random() * empties.length)];
+    this.state.board[dest] = { ...p, moved: true };
+    this.state.board[sq] = null;
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Teleporter! Piece zapped from corner to ${String.fromCharCode(97 + idxToFile(dest))}${idxToRank(dest) + 1}.` });
+  }
+
+  // Fog of War: compute visible squares for a given player color (within radius 2 of any friendly piece).
+  computeFogSquares(color) {
+    const visible = new Set();
+    for (let i = 0; i < 64; i++) {
+      const p = this.state.board[i];
+      if (!p || p.color !== color) continue;
+      const f = idxToFile(i);
+      const r = idxToRank(i);
+      for (let dr = -2; dr <= 2; dr++) {
+        for (let df = -2; df <= 2; df++) {
+          const nf = f + df;
+          const nr = r + dr;
+          if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
+          visible.add(toIdx(nf, nr));
+        }
+      }
+    }
+    return [...visible];
   }
 
   timeReverseNow(plies) {
@@ -465,27 +546,22 @@ class Game {
     const isLegal = legal.some((m) => m.from === from && m.to === to);
     if (!isLegal) return { ok: false, error: "Illegal move" };
 
-    // Snapshot for time reversal.
     this.history.push(deepCloneState(this));
     if (this.history.length > 20) this.history.shift();
 
     const capture = !!this.state.board[to] || (piece.type === "p" && this.state.enPassant != null && to === this.state.enPassant);
 
-    // Apply move.
     const next = applyMoveNoValidation(this.state, { from, to, promotion }, mods);
     this.state = next;
     this.ply += 1;
     let finalTo = to;
     this.lastMoveSquares = [from, to];
 
-    // Consume shield if it would have mattered (next player is in check).
-    // We do this lazily: next state's check evaluation will hide it; we decrement when it prevented check.
     const wouldCheckNext = require("./ChessEngine").isInCheck(this.state, this.state.turn, { ...mods, shield: { w: 0, b: 0 } });
     if (wouldCheckNext && this.shield[this.state.turn] > 0) this.shield[this.state.turn] -= 1;
 
-    // Clear one-move queen tags when used.
+    // Restore temp queen.
     if (piece.tags?.includes("tempQueen")) {
-      // Restore original type after the move.
       const movedPiece = this.state.board[to];
       if (movedPiece && movedPiece._tempOriginalType) {
         movedPiece.type = movedPiece._tempOriginalType;
@@ -494,7 +570,7 @@ class Game {
       }
     }
 
-    // Ice Board: slide moved piece along its move direction.
+    // Ice Board.
     if (mods.iceBoard) {
       const movedPiece = this.state.board[finalTo];
       if (movedPiece) {
@@ -503,20 +579,30 @@ class Game {
       }
     }
 
-    // Echo Trail: copy the moved piece along its path.
+    // Echo Trail.
     if (mods.echoTrail) {
       const movedPiece = this.state.board[finalTo];
       const path = this.movePathSquares(from, finalTo);
       this.applyEchoTrail(path, movedPiece);
     } else if (mods.trails) {
-      // Trails: leave blocks behind (but not if Echo Trail filled the origin).
       if (!this.state.board[from] && !this.missingSquares.has(from)) {
         this.state.board[from] = { type: "x", color: "x", moved: true };
         this.trailBlocks.push(from);
       }
     }
 
-    // Captures cause explosions in chain mode.
+    // Echo Chamber: mirror the move across the vertical axis.
+    if (mods.echoChamber) {
+      this.applyEchoChamberMove(from, finalTo);
+    }
+
+    // Teleporter corners.
+    if (mods.teleporterCorners) {
+      this.applyTeleporterCorner(finalTo);
+      // finalTo may be stale after teleport, but we don't need to track it further.
+    }
+
+    // Chain explosions on capture.
     if (capture && this.permanent.chainExplosions) {
       const adj = [];
       const f = idxToFile(to);
@@ -537,7 +623,7 @@ class Game {
       this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [to, ...adj], reason: "chain" });
     }
 
-    // Respawn as pawns (duration mod): captured piece returns as pawn on home rank.
+    // Respawn as pawns.
     if (capture && mods.respawnAsPawn) {
       const homeRank = color === "w" ? 1 : 6;
       for (let f = 0; f < 8; f++) {
@@ -549,7 +635,7 @@ class Game {
       }
     }
 
-    // Shapeshifters: randomize moved piece type (exclude king).
+    // Shapeshifters.
     if (mods.randomTypeAfterMove) {
       const p2 = this.state.board[finalTo];
       if (p2 && p2.type !== "k" && p2.color !== "x") {
@@ -558,18 +644,20 @@ class Game {
       }
     }
 
-    // Hazards after move.
+    // Hazards after move (includes asteroid).
     this.applyHazardsAfterMove(finalTo);
 
-    // Gravity / shifting / vanishing tiles after move.
+    // King of the Hill: promote pieces on central squares.
+    if (mods.kingOfHill) this.applyKingOfHill();
+
+    // Gravity / shifting / vanishing tiles.
     if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
     if (mods.randomShift) this.applyRandomShift();
     if (mods.vanishingTiles) this.refreshVanishingTiles();
 
-    // Move-twice: grant extra move to the player who just moved.
+    // Move-twice.
     if (mods.moveTwice) this.extraMoves[color] += 1;
 
-    // Extra move counters override turn switch.
     if (this.extraMoves[color] > 0) {
       this.extraMoves[color] -= 1;
       this.state.turn = color;
@@ -579,7 +667,19 @@ class Game {
     // Visual flip countdown.
     if (this.visualFlipPlies > 0) this.visualFlipPlies -= 1;
 
-    // Time reversal request (delayed rule) triggers after move resolution.
+    // Colour blind countdown.
+    if (this.colourBlindPlies > 0) this.colourBlindPlies -= 1;
+
+    // Asteroid countdown — clear remaining debris when it expires.
+    if (this.asteroidPlies > 0) {
+      this.asteroidPlies -= 1;
+      if (this.asteroidPlies === 0 && this.hazards.asteroid.size > 0) {
+        this.hazards.asteroid.clear();
+        this.effects.push({ type: "log", id: this.nextEffectId(), text: "Asteroid debris cleared." });
+      }
+    }
+
+    // Time reversal.
     if (this.requestTimeReverse > 0) {
       this.requestTimeReverse -= 1;
       if (this.requestTimeReverse === 0) {
@@ -587,12 +687,8 @@ class Game {
       }
     }
 
-    // Tick rules after ply.
     this.ruleManager.tickAfterPly();
-
-    // Check game end (checkmate, king deleted, or rule lock).
     this.evaluateGameEnd();
-
     this.maybeStartRuleChoice();
     return { ok: true };
   }
@@ -610,9 +706,31 @@ class Game {
       for (let i = 0; i < 64; i++) if (this.state.board[i]?.type === "k") visibleSquares.add(i);
     }
 
+    // Fog of War: per-player visibility. We send the union here for server state;
+    // the client filters per its own color using fogOfWarSquares[color].
+    let fogOfWarSquares = null;
+    if (mods.fogOfWar) {
+      fogOfWarSquares = {
+        w: this.computeFogSquares("w"),
+        b: this.computeFogSquares("b"),
+      };
+    }
+
+    // Colour blind: mask piece colors in the serialized board.
+    let board = this.state.board;
+    if (this.colourBlindPlies > 0) {
+      board = board.map((p) => {
+        if (!p) return null;
+        if (p.color === "x") return p;
+        // Send color as "?" so client renders all pieces the same shade.
+        return { ...p, color: "?" };
+      });
+    }
+
     const hazards = {
       deadly: [...this.hazards.deadly],
       lava: [...this.hazards.lava],
+      asteroid: [...this.hazards.asteroid],
     };
 
     const marks = {
@@ -623,7 +741,7 @@ class Game {
       roomCode: this.roomCode,
       started: this.started,
       players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color })),
-      board: serializeBoard(this.state.board),
+      board: serializeBoard(board),
       turn: this.state.turn,
       ply: this.ply,
       phase: this.phase,
@@ -640,9 +758,12 @@ class Game {
       marks,
       missingSquares: [...this.missingSquares],
       visualFlip: this.visualFlipPlies > 0,
+      colourBlind: this.colourBlindPlies > 0,
       lastMoveSquares: this.lastMoveSquares,
       invisiblePieces: !!mods.invisiblePieces,
       visibleSquares: visibleSquares ? [...visibleSquares] : null,
+      fogOfWar: !!mods.fogOfWar,
+      fogOfWarSquares,
       lastMove: this.state.lastMove || null,
       resultInfo: this.resultInfo,
     };

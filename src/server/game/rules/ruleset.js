@@ -36,6 +36,21 @@ function squaresAdjacent(sq) {
   return out;
 }
 
+function squaresWithinRadius(sq, radius) {
+  const f = idxToFile(sq);
+  const r = idxToRank(sq);
+  const out = [];
+  for (let dr = -radius; dr <= radius; dr++) {
+    for (let df = -radius; df <= radius; df++) {
+      const nf = f + df;
+      const nr = r + dr;
+      if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
+      out.push(toIdx(nf, nr));
+    }
+  }
+  return out;
+}
+
 function perimeterSquares() {
   const out = [];
   for (let f = 0; f < 8; f++) out.push(toIdx(f, 0));
@@ -86,7 +101,7 @@ function idxToAlg(idx) {
 }
 
 const RULES = [
-  // 🔴 Instant (15)
+  // 🔴 Instant (original 17 + 5 new)
   {
     id: "inst_oops_explosion",
     kind: "instant",
@@ -114,7 +129,6 @@ const RULES = [
         if (p && p.type === "p" && p.color !== "x") pawns.push(i);
       }
 
-      // Shuffle for chaos (and to avoid bias).
       for (let i = pawns.length - 1; i > 0; i--) {
         const j = randInt(i + 1);
         const t = pawns[i];
@@ -239,7 +253,6 @@ const RULES = [
         const to = toIdx(f, nr);
         if (!game.state.board[to] && !game.missingSquares.has(to) && !game.hazards.deadly.has(to)) moves.push({ from: i, to });
       }
-      // Apply in rank order to avoid chain collisions.
       moves.sort((a, b) => (idxToRank(a.from) - idxToRank(b.from)) * -1);
       for (const m of moves) {
         if (!game.state.board[m.from] || game.state.board[m.to]) continue;
@@ -378,7 +391,106 @@ const RULES = [
     },
   },
 
-  // 🟡 In X Turns (15) — executed once when countdown hits 0.
+  // ── NEW INSTANT RULES ──────────────────────────────────────────────────────
+
+  {
+    id: "inst_peasant_revolt",
+    kind: "instant",
+    name: "Peasant Revolt",
+    description: "Every pawn captures the nearest enemy non-king piece within 2 squares, destroying both. Pawns with no target survive.",
+    apply(game) {
+      const toDestroy = new Set();
+      for (let sq = 0; sq < 64; sq++) {
+        const p = game.state.board[sq];
+        if (!p || p.type !== "p" || p.color === "x") continue;
+        const enemy = p.color === "w" ? "b" : "w";
+        // Find nearest enemy non-king within radius 2.
+        let bestSq = null;
+        let bestDist = Infinity;
+        for (let target = 0; target < 64; target++) {
+          const t = game.state.board[target];
+          if (!t || t.color !== enemy || t.type === "k") continue;
+          const df = Math.abs(idxToFile(sq) - idxToFile(target));
+          const dr = Math.abs(idxToRank(sq) - idxToRank(target));
+          const dist = df + dr;
+          if (dist <= 2 && dist < bestDist) {
+            bestDist = dist;
+            bestSq = target;
+          }
+        }
+        if (bestSq != null) {
+          toDestroy.add(sq);
+          toDestroy.add(bestSq);
+        }
+      }
+      destroySquares(game, [...toDestroy], "revolt");
+    },
+  },
+  {
+    id: "inst_identity_crisis",
+    kind: "instant",
+    name: "Identity Crisis",
+    description: "Each king's movement is swapped with a random friendly non-pawn piece for 3 turns. The pieces swap types; kings remain kings for check purposes.",
+    apply(game) {
+      for (const c of ["w", "b"]) {
+        const kSq = randomPieceSquare(game, c, (p) => p.type === "k");
+        const otherSq = randomPieceSquare(game, c, (p) => p.type !== "k" && p.type !== "p");
+        if (kSq == null || otherSq == null) continue;
+        const other = game.state.board[otherSq];
+        // Tag the king to move like the swapped piece type.
+        const king = game.state.board[kSq];
+        king.tags = king.tags || [];
+        king._identityType = other.type;
+        king._identityPliesLeft = 6; // 6 plies ≈ 3 full turns
+        king.tags.push("identityCrisis");
+        // The other piece takes on "k" movement style visually (cosmetic tag only).
+        other.tags = other.tags || [];
+        other.tags.push("identityCrisis");
+        other._identityPliesLeft = 6;
+      }
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Identity Crisis! Kings and pieces have swapped movement styles." });
+    },
+  },
+  {
+    id: "inst_sniper",
+    kind: "instant",
+    name: "Sniper",
+    description: "A random non-king piece on each side is silently eliminated. No explosion — it just vanishes.",
+    apply(game) {
+      for (const c of ["w", "b"]) {
+        const sq = randomPieceSquare(game, c, (p) => p.type !== "k");
+        if (sq == null) continue;
+        game.state.board[sq] = null;
+        // No explosion effect — silent removal is the flavour.
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: `Sniper eliminated a ${c === "w" ? "White" : "Black"} piece at ${idxToAlg(sq)}.` });
+      }
+    },
+  },
+  {
+    id: "inst_asteroid_belt",
+    kind: "instant",
+    name: "Asteroid Belt",
+    description: "Three random squares gain asteroid debris. Any piece landing on one in the next 5 turns is destroyed on impact.",
+    apply(game) {
+      const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i) && !game.state.board[i]);
+      const chosen = pickN(candidates.length ? candidates : [...Array(64).keys()].filter((i) => !game.missingSquares.has(i)), 3);
+      for (const sq of chosen) game.hazards.asteroid.add(sq);
+      game.asteroidPlies = 5;
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Asteroid debris landed on: ${chosen.map(idxToAlg).join(", ")}.` });
+    },
+  },
+  {
+    id: "inst_colour_blind",
+    kind: "instant",
+    name: "Colour Blind",
+    description: "For 4 turns, pieces lose their colour markings — neither player can tell friend from foe visually. Captures still work normally.",
+    apply(game) {
+      game.colourBlindPlies = Math.max(game.colourBlindPlies || 0, 4);
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Colour Blind! You can't tell friend from foe for 4 turns." });
+    },
+  },
+
+  // 🟡 In X Turns (original 16 + 5 new)
   {
     id: "del_mutation_event_5",
     kind: "delayed",
@@ -620,7 +732,136 @@ const RULES = [
     },
   },
 
-  // 🟢 For X Turns (15)
+  // ── NEW DELAYED RULES ──────────────────────────────────────────────────────
+
+  {
+    id: "del_orbital_strike_10",
+    kind: "delayed",
+    delayTurns: 10,
+    name: "Orbital Strike",
+    description: "In 10 turns, a marked square is obliterated — the piece on it and all adjacent pieces are destroyed.",
+    onSchedule(game, inst) {
+      const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i));
+      inst.data.targetSq = candidates[randInt(candidates.length)];
+      // Reuse the lightning mark set for the visual indicator.
+      if (game.marks?.lightning) game.marks.lightning.add(inst.data.targetSq);
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Orbital strike locked onto ${idxToAlg(inst.data.targetSq)}. Brace for impact.` });
+    },
+    apply(game, ctx) {
+      const sq = ctx?.inst?.data?.targetSq;
+      if (typeof sq !== "number") return;
+      if (game.marks?.lightning) game.marks.lightning.delete(sq);
+      const blast = [sq, ...squaresAdjacent(sq)];
+      destroySquares(game, blast, "orbital");
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Orbital strike hit ${idxToAlg(sq)}!` });
+    },
+  },
+  {
+    id: "del_tax_collection_6",
+    kind: "delayed",
+    delayTurns: 6,
+    name: "Tax Collection",
+    description: "In 6 turns, the player with more material loses their second-most-valuable piece to taxation.",
+    apply(game) {
+      // Score each side.
+      const score = { w: 0, b: 0 };
+      for (let i = 0; i < 64; i++) {
+        const p = game.state.board[i];
+        if (!p || p.color === "x" || p.type === "k") continue;
+        score[p.color] += pieceValue(p.type);
+      }
+      const richer = score.w > score.b ? "w" : score.b > score.w ? "b" : null;
+      if (richer == null) {
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: "Tax Collection: material equal, nobody taxed." });
+        return;
+      }
+      // Find second-most-valuable piece.
+      const pieces = [];
+      for (let i = 0; i < 64; i++) {
+        const p = game.state.board[i];
+        if (!p || p.color !== richer || p.type === "k") continue;
+        pieces.push({ sq: i, v: pieceValue(p.type) });
+      }
+      pieces.sort((a, b) => b.v - a.v);
+      const target = pieces[1] ?? pieces[0];
+      if (!target) return;
+      destroySquares(game, [target.sq], "tax");
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Tax Collection: ${richer === "w" ? "White" : "Black"} paid the taxman.` });
+    },
+  },
+  {
+    id: "del_pawn_conscription_4",
+    kind: "delayed",
+    delayTurns: 4,
+    name: "Pawn Conscription",
+    description: "In 4 turns, one random non-pawn piece on each side is demoted to a pawn.",
+    apply(game) {
+      for (const c of ["w", "b"]) {
+        const sq = randomPieceSquare(game, c, (p) => p.type !== "k" && p.type !== "p");
+        if (sq == null) continue;
+        game.state.board[sq].type = "p";
+        game.state.board[sq].tags = game.state.board[sq].tags || [];
+        game.state.board[sq].tags.push("conscripted");
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: `Conscription: ${c === "w" ? "White" : "Black"} piece at ${idxToAlg(sq)} demoted to pawn.` });
+      }
+    },
+  },
+  {
+    id: "del_betrayal_3",
+    kind: "delayed",
+    delayTurns: 3,
+    name: "Betrayal",
+    description: "In 3 turns, a random non-king piece on each side defects to the opponent.",
+    apply(game) {
+      for (const c of ["w", "b"]) {
+        const sq = randomPieceSquare(game, c, (p) => p.type !== "k");
+        if (sq == null) continue;
+        game.state.board[sq].color = c === "w" ? "b" : "w";
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: `Betrayal! A ${c === "w" ? "White" : "Black"} piece at ${idxToAlg(sq)} switched sides.` });
+      }
+    },
+  },
+  {
+    id: "del_copycat_positions_6",
+    kind: "delayed",
+    delayTurns: 6,
+    name: "Copycat Delayed",
+    description: "In 6 turns, piece positions revert to how they were right now — but captured pieces stay captured.",
+    onSchedule(game, inst) {
+      // Snapshot current piece positions only (not counts — pieces that die stay dead).
+      inst.data.snapshot = game.state.board.map((p) =>
+        p ? { type: p.type, color: p.color, moved: p.moved, tags: p.tags ? [...p.tags] : undefined } : null
+      );
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: "Copycat Delayed: position snapshot taken." });
+    },
+    apply(game, ctx) {
+      const snap = ctx?.inst?.data?.snapshot;
+      if (!snap) return;
+      // Build a set of piece identities still alive on the board now (by color+type count).
+      const liveCounts = { wp: 0, wn: 0, wb: 0, wr: 0, wq: 0, wk: 0, bp: 0, bn: 0, bb: 0, br: 0, bq: 0, bk: 0 };
+      for (let i = 0; i < 64; i++) {
+        const p = game.state.board[i];
+        if (p && p.color !== "x") liveCounts[`${p.color}${p.type}`] = (liveCounts[`${p.color}${p.type}`] || 0) + 1;
+      }
+      // Restore snapshot positions, but only place a piece if we still have live budget for it.
+      const placedCounts = { ...liveCounts };
+      Object.keys(placedCounts).forEach((k) => (placedCounts[k] = 0));
+      const next = Array(64).fill(null);
+      for (let i = 0; i < 64; i++) {
+        const p = snap[i];
+        if (!p || p.color === "x") continue;
+        const key = `${p.color}${p.type}`;
+        if ((placedCounts[key] || 0) < (liveCounts[key] || 0)) {
+          next[i] = { ...p, tags: p.tags ? [...p.tags] : undefined };
+          placedCounts[key] = (placedCounts[key] || 0) + 1;
+        }
+      }
+      game.state.board = next;
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Copycat Delayed: positions rewound!" });
+    },
+  },
+
+  // 🟢 For X Turns (original 18 + 4 new)
   {
     id: "dur_ice_board_5",
     kind: "duration",
@@ -802,6 +1043,49 @@ const RULES = [
     description: "For 6 turns, board tiles randomly disappear and reappear.",
     modifiers() {
       return { vanishingTiles: true };
+    },
+  },
+
+  // ── NEW DURATION RULES ─────────────────────────────────────────────────────
+
+  {
+    id: "dur_king_of_hill_6",
+    kind: "duration",
+    durationTurns: 6,
+    name: "King of the Hill",
+    description: "For 6 turns, any piece standing on the central 4 squares at end of each turn is promoted one tier (pawn→knight→bishop→rook→queen). Queens stay queens.",
+    modifiers() {
+      return { kingOfHill: true };
+    },
+  },
+  {
+    id: "dur_fog_of_war_5",
+    kind: "duration",
+    durationTurns: 5,
+    name: "Fog of War",
+    description: "For 5 turns, you can only see squares within 2 of your own pieces. Enemy positions outside that range are hidden.",
+    modifiers() {
+      return { fogOfWar: true };
+    },
+  },
+  {
+    id: "dur_teleporter_corners_8",
+    kind: "duration",
+    durationTurns: 8,
+    name: "Teleporter Tiles",
+    description: "For 8 turns, landing on a corner square teleports the piece to a random empty square.",
+    modifiers() {
+      return { teleporterCorners: true };
+    },
+  },
+  {
+    id: "dur_echo_chamber_4",
+    kind: "duration",
+    durationTurns: 4,
+    name: "Echo Chamber",
+    description: "For 4 turns, every move is also mirrored along the vertical axis. If the mirror square is occupied, that piece is destroyed.",
+    modifiers() {
+      return { echoChamber: true };
     },
   },
 ];
