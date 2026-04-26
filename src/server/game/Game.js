@@ -167,7 +167,7 @@ class Game {
   maybeStartRuleChoice() {
     if (!this.started || this.result) return;
     // Every 3 combined turns (ply), trigger a choice after the move resolves.
-    if (this.ply > 0 && this.ply % 3 === 0) {
+    if (this.ply > 0 && this.ply % 10 === 0) {
       this.phase = "ruleChoice";
       this.ruleChoicesByPlayerId = {};
       this.ruleChosenByPlayerId = {};
