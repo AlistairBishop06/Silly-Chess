@@ -198,6 +198,19 @@ io.on("connection", (socket) => {
     pushEffectsAndState(code);
   });
 
+  socket.on("game:rpsChoice", ({ code, playerId, choice } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.submitRpsChoice(pid, choice);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
   socket.on("game:ready", ({ code, playerId } = {}, cb) => {
     const entry = rooms.get(code);
     if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
@@ -240,6 +253,7 @@ setInterval(() => {
     const beforePhase = g.phase;
     const beforeEffectSeq = g.effectSeq;
     g.enforceRuleChoiceTimeoutIfNeeded();
+    g.enforceMiniGameTimeoutIfNeeded();
     const changed = beforePhase !== g.phase || beforeEffectSeq !== g.effectSeq;
     if (changed) pushEffectsAndState(code);
   }

@@ -27,6 +27,12 @@ const els = {
   choiceArea: document.getElementById("choiceArea"),
   choiceCards: document.getElementById("choiceCards"),
   choiceTimer: document.getElementById("choiceTimer"),
+  rpsModal: document.getElementById("rpsModal"),
+  rpsTimer: document.getElementById("rpsTimer"),
+  rpsStatus: document.getElementById("rpsStatus"),
+  rpsRockBtn: document.getElementById("rpsRockBtn"),
+  rpsPaperBtn: document.getElementById("rpsPaperBtn"),
+  rpsScissorsBtn: document.getElementById("rpsScissorsBtn"),
   log: document.getElementById("log"),
   gameMsg: document.getElementById("gameMsg"),
 };
@@ -293,6 +299,8 @@ function draw() {
 
   const s = state.serverState;
   const size = els.canvas.width / 8;
+  const fogVisible =
+    s.fogOfWar && s.fogOfWarSquares && state.color ? new Set(s.fogOfWarSquares[state.color] || []) : null;
 
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
 
@@ -313,6 +321,11 @@ function draw() {
 
       ctx.fillStyle = fill;
       ctx.fillRect(x, y, size, size);
+
+      if (fogVisible && !fogVisible.has(sq) && !(s.missingSquares || []).includes(sq)) {
+        ctx.fillStyle = "rgba(10,12,18,0.55)";
+        ctx.fillRect(x, y, size, size);
+      }
     }
   }
 
@@ -325,6 +338,7 @@ function draw() {
   }
   if (state.legalTo && state.selected != null) {
     for (const to of state.legalTo) {
+      if (fogVisible && !fogVisible.has(to)) continue;
       const c = squareToCanvasCenter(to);
       ctx.fillStyle = "rgba(123,211,255,0.25)";
       ctx.beginPath();
@@ -337,6 +351,7 @@ function draw() {
   for (let sq = 0; sq < 64; sq++) {
     const p = s.board[sq];
     if (!p) continue;
+    if (fogVisible && p.color !== state.color && p.color !== "x" && !fogVisible.has(sq)) continue;
     if (s.invisiblePieces && !(s.visibleSquares || []).includes(sq) && p.type !== "k") continue;
     if (p.color === "x") {
       drawBlock(sq);
@@ -383,6 +398,8 @@ function draw() {
   const msg =
     s.phase === "ruleChoice"
       ? "Rule choice!"
+      : s.phase === "rps"
+        ? "RPS Duel!"
       : s.result
         ? s.result
         : yourTurn
@@ -394,6 +411,7 @@ function draw() {
 function drawPiece(sq, p) {
   const { x, y } = squareToCanvasCenter(sq);
   const size = els.canvas.width / 8;
+  const colourBlind = !!(state.serverState && state.serverState.colourBlind);
   const map = {
     p: { w: "♙", b: "♟" },
     n: { w: "♘", b: "♞" },
@@ -414,10 +432,15 @@ function drawPiece(sq, p) {
   ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = p.color === "w" ? "#fbfbff" : "#101422";
-  ctx.strokeStyle = p.color === "w" ? "rgba(10,12,18,0.28)" : "rgba(255,255,255,0.18)";
+  if (colourBlind) {
+    ctx.fillStyle = "rgba(210,215,226,0.92)";
+    ctx.strokeStyle = "rgba(10,12,18,0.42)";
+  } else {
+    ctx.fillStyle = p.color === "w" ? "#fbfbff" : "#101422";
+    ctx.strokeStyle = p.color === "w" ? "rgba(10,12,18,0.28)" : "rgba(255,255,255,0.18)";
+  }
   ctx.lineWidth = 4;
-  const glyph = map[p.type]?.[p.color] || "?";
+  const glyph = (colourBlind ? map[p.type]?.w : map[p.type]?.[p.color]) || "?";
   ctx.strokeText(glyph, x, y + 2);
   ctx.fillText(glyph, x, y);
 
@@ -574,6 +597,45 @@ function updateChoiceTimer() {
   els.choiceTimer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
 }
 
+function updateRpsTimer() {
+  const s = state.serverState;
+  if (!s || els.rpsModal.hidden) return;
+  const remainingMs = Math.max(0, (s.rps?.deadlineMs || 0) - Date.now());
+  els.rpsTimer.textContent = remainingMs ? `${Math.ceil(remainingMs / 1000)}s` : "";
+}
+
+function otherColor(c) {
+  return c === "w" ? "b" : c === "b" ? "w" : null;
+}
+
+function renderRps() {
+  const s = state.serverState;
+  const active = !!s?.rps?.active && s?.phase === "rps";
+  els.rpsModal.hidden = !active;
+  if (!active) {
+    if (els.rpsStatus) els.rpsStatus.textContent = "";
+    if (els.rpsTimer) els.rpsTimer.textContent = "";
+    return;
+  }
+
+  updateRpsTimer();
+
+  const picked = s.rps?.pickedByColor || {};
+  const you = state.color;
+  const opp = otherColor(you);
+  const youPicked = you ? !!picked[you] : false;
+  const oppPicked = opp ? !!picked[opp] : false;
+
+  if (els.rpsStatus) {
+    els.rpsStatus.textContent = `Round ${s.rps.round || 1} · You: ${youPicked ? "picked" : "waiting"} · Opponent: ${oppPicked ? "picked" : "waiting"}`;
+  }
+
+  const disable = !state.lobby || !state.playerId || youPicked;
+  if (els.rpsRockBtn) els.rpsRockBtn.disabled = disable;
+  if (els.rpsPaperBtn) els.rpsPaperBtn.disabled = disable;
+  if (els.rpsScissorsBtn) els.rpsScissorsBtn.disabled = disable;
+}
+
 function renderChoice() {
   const s = state.serverState;
   const choice = (s.ruleChoicesByPlayerId || {})[state.playerId];
@@ -642,6 +704,7 @@ function syncUI() {
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
   renderCards();
   renderChoice();
+  renderRps();
 
   // Result modal.
   const ri = s.resultInfo;
@@ -784,6 +847,18 @@ els.readyBtn?.addEventListener("click", () => {
   });
 });
 
+function sendRpsChoice(choice) {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:rpsChoice", { code: state.lobby, playerId: state.playerId, choice }, (res) => {
+    if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "RPS pick failed")}`);
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+}
+
+els.rpsRockBtn?.addEventListener("click", () => sendRpsChoice("rock"));
+els.rpsPaperBtn?.addEventListener("click", () => sendRpsChoice("paper"));
+els.rpsScissorsBtn?.addEventListener("click", () => sendRpsChoice("scissors"));
+
 els.canvas.addEventListener("mousedown", (ev) => {
   if (!state.serverState || !state.lobby) return;
   const s = state.serverState;
@@ -828,6 +903,7 @@ draw();
 setInterval(() => {
   if (!state.serverState) return;
   updateChoiceTimer();
+  updateRpsTimer();
 }, 250);
 
 // Fallback sync: if we haven't seen a state update recently, request one.

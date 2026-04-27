@@ -58,7 +58,7 @@ class Game {
 
     this.state = initialState();
     this.ply = 0;
-    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice"
+    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "rps"
 
     this.result = null;
     this.resultInfo = null;
@@ -97,6 +97,9 @@ class Game {
     this.trailBlocks = [];
     this.requestTimeReverse = 0;
     this.history = [];
+
+    // Mini-games.
+    this.rps = null; // { round, byColor:{w,b}, pickedByColor:{w,b}, deadlineMs }
 
     this.onRuleEnded = (ruleId) => {
       if (ruleId === "dur_trails_6") {
@@ -172,6 +175,7 @@ class Game {
   }
 
   applyChosenRulesAndResume() {
+    const beforePhase = this.phase;
     const white = this.players.find((p) => p.color === "w");
     const black = this.players.find((p) => p.color === "b");
     const ids = [];
@@ -182,7 +186,7 @@ class Game {
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
-    this.phase = "play";
+    if (this.phase === beforePhase) this.phase = "play";
     this.evaluateGameEnd();
   }
 
@@ -210,6 +214,114 @@ class Game {
     }
     this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rule choice timed out; auto-picked." });
     this.applyChosenRulesAndResume();
+  }
+
+  enforceMiniGameTimeoutIfNeeded() {
+    if (this.phase !== "rps" || !this.rps) return;
+    if (this.rps.deadlineMs == null) return;
+    if (Date.now() < this.rps.deadlineMs) return;
+
+    const opts = ["rock", "paper", "scissors"];
+    for (const c of ["w", "b"]) {
+      if (this.rps.byColor[c]) continue;
+      this.rps.byColor[c] = opts[Math.floor(Math.random() * opts.length)];
+      this.rps.pickedByColor[c] = true;
+    }
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: "RPS duel timed out; auto-picked." });
+    this.resolveRpsIfReady();
+  }
+
+  startRpsDuel() {
+    if (!this.started || this.result) return { ok: false, error: "Game not active" };
+    if (this.players.length !== 2) return { ok: false, error: "Need two players" };
+    if (this.rps) return { ok: false, error: "RPS already running" };
+
+    this.phase = "rps";
+    this.rps = {
+      round: 1,
+      byColor: { w: null, b: null },
+      pickedByColor: { w: false, b: false },
+      deadlineMs: Date.now() + 20_000,
+    };
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: "RPS duel! Pick rock, paper, or scissors." });
+    return { ok: true };
+  }
+
+  submitRpsChoice(playerId, choice) {
+    if (this.phase !== "rps" || !this.rps) return { ok: false, error: "No RPS duel active" };
+    if (this.result) return { ok: false, error: "Game over" };
+
+    const color = this.playerColor(playerId);
+    if (color !== "w" && color !== "b") return { ok: false, error: "Not a player" };
+
+    const normalized = String(choice || "").toLowerCase();
+    if (!["rock", "paper", "scissors"].includes(normalized)) return { ok: false, error: "Invalid choice" };
+
+    if (this.rps.byColor[color]) return { ok: false, error: "Already picked" };
+    this.rps.byColor[color] = normalized;
+    this.rps.pickedByColor[color] = true;
+
+    if (this.rps.deadlineMs != null) {
+      this.rps.deadlineMs = Math.max(this.rps.deadlineMs, Date.now() + 10_000);
+    }
+
+    this.resolveRpsIfReady();
+    return { ok: true };
+  }
+
+  resolveRpsIfReady() {
+    if (!this.rps) return;
+    const w = this.rps.byColor.w;
+    const b = this.rps.byColor.b;
+    if (!w || !b) return;
+
+    const beats = { rock: "scissors", paper: "rock", scissors: "paper" };
+
+    if (w === b) {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: `RPS round ${this.rps.round}: tie (${w}). Pick again!` });
+      this.rps.round += 1;
+      this.rps.byColor = { w: null, b: null };
+      this.rps.pickedByColor = { w: false, b: false };
+      this.rps.deadlineMs = Date.now() + 15_000;
+      return;
+    }
+
+    const winner = beats[w] === b ? "w" : beats[b] === w ? "b" : null;
+    if (!winner) {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "RPS duel error; resetting round." });
+      this.rps.byColor = { w: null, b: null };
+      this.rps.pickedByColor = { w: false, b: false };
+      this.rps.deadlineMs = Date.now() + 15_000;
+      return;
+    }
+
+    const loser = winner === "w" ? "b" : "w";
+    const loserSq = this.randomPieceSquare(loser, (p) => p.type !== "k");
+    if (loserSq != null) {
+      this.state.board[loserSq] = null;
+      this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [loserSq], reason: "rps" });
+    }
+    this.effects.push({
+      type: "rule",
+      id: this.nextEffectId(),
+      text: `RPS duel: ${winner === "w" ? "White" : "Black"} wins (${w} vs ${b}). ${loser === "w" ? "White" : "Black"} loses a random piece.`,
+    });
+
+    this.rps = null;
+    this.phase = "play";
+    this.evaluateGameEnd();
+  }
+
+  randomPieceSquare(color, filterFn) {
+    const squares = [];
+    for (let i = 0; i < 64; i++) {
+      const p = this.state.board[i];
+      if (!p || p.color !== color) continue;
+      if (filterFn && !filterFn(p)) continue;
+      squares.push(i);
+    }
+    if (!squares.length) return null;
+    return squares[Math.floor(Math.random() * squares.length)];
   }
 
   findKingSquare(color) {
@@ -414,7 +526,7 @@ class Game {
     this.effects.push({ type: "log", id: this.nextEffectId(), text: `Teleporter! Piece zapped from corner to ${String.fromCharCode(97 + idxToFile(dest))}${idxToRank(dest) + 1}.` });
   }
 
-  // Fog of War: compute visible squares for a given player color (within radius 2 of any friendly piece).
+  // Fog of War: compute visible squares for a given player color (within radius 1 of any friendly piece).
   computeFogSquares(color) {
     const visible = new Set();
     for (let i = 0; i < 64; i++) {
@@ -422,8 +534,8 @@ class Game {
       if (!p || p.color !== color) continue;
       const f = idxToFile(i);
       const r = idxToRank(i);
-      for (let dr = -2; dr <= 2; dr++) {
-        for (let df = -2; df <= 2; df++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let df = -1; df <= 1; df++) {
           const nf = f + df;
           const nr = r + dr;
           if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
@@ -695,6 +807,7 @@ class Game {
 
   toClientState() {
     this.enforceRuleChoiceTimeoutIfNeeded();
+    this.enforceMiniGameTimeoutIfNeeded();
     const mods = this.currentModifiers();
     const inCheck = require("./ChessEngine").isInCheck(this.state, this.state.turn, mods);
     const checkLabel = inCheck ? (this.state.turn === "w" ? "White" : "Black") : null;
@@ -716,16 +829,8 @@ class Game {
       };
     }
 
-    // Colour blind: mask piece colors in the serialized board.
-    let board = this.state.board;
-    if (this.colourBlindPlies > 0) {
-      board = board.map((p) => {
-        if (!p) return null;
-        if (p.color === "x") return p;
-        // Send color as "?" so client renders all pieces the same shade.
-        return { ...p, color: "?" };
-      });
-    }
+    // Colour blind is visual-only; keep true colors in the serialized board so gameplay remains unchanged.
+    const board = this.state.board;
 
     const hazards = {
       deadly: [...this.hazards.deadly],
@@ -764,6 +869,9 @@ class Game {
       visibleSquares: visibleSquares ? [...visibleSquares] : null,
       fogOfWar: !!mods.fogOfWar,
       fogOfWarSquares,
+      rps: this.rps
+        ? { active: true, round: this.rps.round, pickedByColor: { ...this.rps.pickedByColor }, deadlineMs: this.rps.deadlineMs }
+        : null,
       lastMove: this.state.lastMove || null,
       resultInfo: this.resultInfo,
     };

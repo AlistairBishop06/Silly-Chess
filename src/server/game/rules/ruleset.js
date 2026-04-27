@@ -172,11 +172,8 @@ const RULES = [
     name: "RPS Duel",
     description: "Rock-paper-scissors duel. Loser loses a random non-king piece.",
     apply(game) {
-      const winner = randInt(2) === 0 ? "w" : "b";
-      const loser = winner === "w" ? "b" : "w";
-      const sq = randomPieceSquare(game, loser, (p) => p.type !== "k");
-      if (sq != null) destroySquares(game, [sq], "rps");
-      game.effects.push({ type: "rule", id: game.nextEffectId(), text: `RPS duel winner: ${winner === "w" ? "White" : "Black"}` });
+      // Starts an interactive mini-game (server blocks play until both players pick).
+      game.startRpsDuel?.();
     },
   },
   {
@@ -1086,7 +1083,7 @@ const RULES = [
     kind: "duration",
     durationTurns: 5,
     name: "Fog of War",
-    description: "For 5 turns, you can only see squares within 2 of your own pieces. Enemy positions outside that range are hidden.",
+    description: "For 5 turns, you can only see squares within 1 of your own pieces. Enemy positions outside that range are hidden.",
     modifiers() {
       return { fogOfWar: true };
     },

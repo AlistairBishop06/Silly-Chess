@@ -54,20 +54,44 @@
               <div id="overlayText" class="overlayText"></div>
             </div>
 
-            <div class="cardsArea">
-              <div class="cardsHeader">
-                <h3>Active Rules</h3>
-                <div id="gameMsg" class="gameMsg"></div>
-              </div>
-              <div id="activeCards" class="cards"></div>
-            </div>
-
             <div class="cardsArea" id="choiceArea" hidden>
               <div class="cardsHeader">
                 <h3>Pick 1 rule (you get 3)</h3>
                 <div id="choiceTimer" class="timer"></div>
               </div>
               <div id="choiceCards" class="cards choice"></div>
+            </div>
+
+            <div id="sidePanel" class="sidePanel">
+              <div class="cardsArea">
+                <div class="cardsHeader">
+                  <h3>Active Rules</h3>
+                  <div id="gameMsg" class="gameMsg"></div>
+                </div>
+                <div id="activeCards" class="cards"></div>
+              </div>
+
+              <div class="cardsArea logPanel">
+                <div class="cardsHeader">
+                  <h3>Log</h3>
+                </div>
+                <div id="log" class="log"></div>
+              </div>
+            </div>
+
+            <div id="rpsModal" class="modal" hidden>
+              <div class="modalCard">
+                <div class="cardsHeader">
+                  <h3>RPS Duel</h3>
+                  <div id="rpsTimer" class="timer"></div>
+                </div>
+                <div id="rpsStatus" class="modalStatus">â€”</div>
+                <div class="rpsButtons">
+                  <button id="rpsRockBtn" type="button">Rock</button>
+                  <button id="rpsPaperBtn" type="button">Paper</button>
+                  <button id="rpsScissorsBtn" type="button">Scissors</button>
+                </div>
+              </div>
             </div>
 
             <div id="resultModal" class="modal" hidden>

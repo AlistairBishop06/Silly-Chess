@@ -247,6 +247,16 @@ canvas {
   margin-top: 12px;
 }
 
+.rpsButtons {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.rpsButtons button {
+  flex: 1 1 0;
+}
+
 .cardsHeader {
   display: flex;
   align-items: center;
@@ -554,7 +564,7 @@ body:has(#gamePanel:not([hidden])) #gamePanel:has(#choiceArea[hidden]) {
 
 body:has(#gamePanel:not([hidden])) #gamePanel > .gameHeader { grid-area: header; }
 body:has(#gamePanel:not([hidden])) #gamePanel > .boardWrap { grid-area: board; }
-body:has(#gamePanel:not([hidden])) #gamePanel > .cardsArea:not(#choiceArea) { grid-area: active; }
+body:has(#gamePanel:not([hidden])) #gamePanel > #sidePanel { grid-area: active; }
 body:has(#gamePanel:not([hidden])) #gamePanel > #choiceArea { grid-area: choice; }
 
 body:has(#gamePanel:not([hidden])) #gamePanel > .boardWrap {
@@ -576,6 +586,23 @@ body:has(#gamePanel:not([hidden])) #gamePanel .cardsArea {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+body:has(#gamePanel:not([hidden])) #gamePanel .sidePanel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+body:has(#gamePanel:not([hidden])) #gamePanel .sidePanel > .logPanel {
+  flex: 1 1 auto;
+}
+
+body:has(#gamePanel:not([hidden])) #gamePanel .sidePanel > .logPanel .log {
+  flex: 1 1 auto;
+  height: auto;
 }
 
 body:has(#gamePanel:not([hidden])) #gamePanel .cards {
