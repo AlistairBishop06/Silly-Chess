@@ -1194,6 +1194,113 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   flex: 1 1 0;
 }
 
+.wagerCard {
+  width: min(720px, 92vw);
+  max-height: min(86vh, 640px);
+  display: flex;
+  flex-direction: column;
+}
+
+.wagerCard .modalActions {
+  justify-content: stretch;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.wagerCard .modalActions button {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.wagerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  max-height: min(260px, 34vh);
+  overflow: auto;
+  padding-right: 6px;
+  margin: 10px 0 0;
+}
+
+.wagerSplit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .wagerSplit {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wagerPiece {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wagerPiece:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.wagerPiece.selected {
+  border-color: rgba(123, 211, 255, 0.60);
+  box-shadow: 0 0 0 2px rgba(123, 211, 255, 0.12);
+}
+
+.wagerGlyph {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.wagerMeta {
+  font-size: 12px;
+  color: rgba(249, 251, 255, 0.72);
+}
+
+.coinArea {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.coinSpinWrap {
+  display: grid;
+  place-items: center;
+  margin: 10px 0 6px;
+}
+
+.coinSpin {
+  width: 120px;
+  height: 120px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-weight: 950;
+  letter-spacing: 0.6px;
+  color: rgba(12, 16, 28, 0.9);
+  background: radial-gradient(circle at 30% 25%, #fff3b0, #d3a642 70%, #8a6216 100%);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  transform-style: preserve-3d;
+  animation: coinSpin 0.9s linear infinite;
+}
+
+.coinSpin.stopped {
+  animation: none;
+}
+
+@keyframes coinSpin {
+  from { transform: rotateY(0deg) rotateX(12deg); }
+  to { transform: rotateY(360deg) rotateX(12deg); }
+}
+
 .confetti {
   position: absolute;
   inset: 0;

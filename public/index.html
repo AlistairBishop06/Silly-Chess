@@ -57,9 +57,9 @@
             </div>
 
             <div class="lobbyStats" aria-hidden="true">
-              <div><strong>10</strong><span>round twists</span></div>
-              <div><strong>3</strong><span>card drafts</span></div>
-              <div><strong>1v1</strong><span>chaos duel</span></div>
+              <div><strong>7</strong><span>rounds between drafts</span></div>
+              <div><strong>3</strong><span>cards per draft</span></div>
+              <div><strong>1v1</strong><span>duel</span></div>
             </div>
           </div>
 
@@ -89,7 +89,7 @@
 
             <div class="cardsArea" id="choiceArea" hidden>
               <div class="cardsHeader">
-                <h3>Pick a rule</h3>
+                <h3 id="choiceTitle">Pick a rule</h3>
                 <div id="choiceTimer" class="timer"></div>
               </div>
               <div id="choiceCards" class="cards choice"></div>
@@ -127,6 +127,39 @@
               </div>
             </div>
 
+            <div id="wagerModal" class="modal" hidden>
+              <div class="modalCard wagerCard">
+                <div class="cardsHeader">
+                  <h3>Coinflip Wager</h3>
+                  <div id="wagerTimer" class="timer"></div>
+                </div>
+                <div id="wagerStatus" class="modalDetail">-</div>
+
+                <div class="wagerSplit">
+                  <div>
+                    <div class="modalStatus">Your wager</div>
+                    <div id="wagerYouGrid" class="wagerGrid"></div>
+                  </div>
+                  <div>
+                    <div class="modalStatus">Opponent wager</div>
+                    <div id="wagerOppGrid" class="wagerGrid"></div>
+                  </div>
+                </div>
+
+                <div id="coinArea" class="coinArea" hidden>
+                  <div id="coinAssign" class="modalStatus"></div>
+                  <div class="coinSpinWrap">
+                    <div id="coinSpin" class="coinSpin">HEADS</div>
+                  </div>
+                  <div id="wagerResult" class="modalTitle"></div>
+                </div>
+
+                <div class="modalActions">
+                  <button id="wagerConfirmBtn" type="button">Confirm wager</button>
+                </div>
+              </div>
+            </div>
+
             <div id="resultModal" class="modal" hidden>
               <canvas id="confetti" class="confetti"></canvas>
               <div class="modalCard">
@@ -145,12 +178,22 @@
           <div class="panel helpPanel">
             <h2>Table rules</h2>
             <div class="help">
-              Play normal chess until the rule draft opens. Every few rounds, each player chooses a card that mutates the match.
+              Play normal chess until the rule draft opens every 7 rounds. Each player must then choose a card that mutates the match. What rules will you add to claim victory?
+              <br>
+              You could...
             </div>
             <div class="ruleTeasers" aria-hidden="true">
-              <div>Explode files</div>
-              <div>Flip vision</div>
-              <div>Trap squares</div>
+              <div>Make giant rooks</div>
+              <div>Add a fan to the board</div>
+              <div>Launch an orbital missile at your enemy</div>
+              <div>Make the board slippery</div>
+              <div>Summon a black hole</div>
+              <div>Strap a bomb to a knight</div>
+              <div>Blind your opponent</div>
+              <div>Make your king spawn a trail of baby kings</div>
+              <div>Play rock paper scissors</div>
+              <div>Wager your pieces on minigames</div>
+
             </div>
           </div>
         </section>

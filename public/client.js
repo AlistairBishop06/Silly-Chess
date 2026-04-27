@@ -27,12 +27,23 @@ const els = {
   choiceArea: document.getElementById("choiceArea"),
   choiceCards: document.getElementById("choiceCards"),
   choiceTimer: document.getElementById("choiceTimer"),
+  choiceTitle: document.getElementById("choiceTitle"),
   rpsModal: document.getElementById("rpsModal"),
   rpsTimer: document.getElementById("rpsTimer"),
   rpsStatus: document.getElementById("rpsStatus"),
   rpsRockBtn: document.getElementById("rpsRockBtn"),
   rpsPaperBtn: document.getElementById("rpsPaperBtn"),
   rpsScissorsBtn: document.getElementById("rpsScissorsBtn"),
+  wagerModal: document.getElementById("wagerModal"),
+  wagerTimer: document.getElementById("wagerTimer"),
+  wagerStatus: document.getElementById("wagerStatus"),
+  wagerYouGrid: document.getElementById("wagerYouGrid"),
+  wagerOppGrid: document.getElementById("wagerOppGrid"),
+  wagerConfirmBtn: document.getElementById("wagerConfirmBtn"),
+  coinArea: document.getElementById("coinArea"),
+  coinAssign: document.getElementById("coinAssign"),
+  coinSpin: document.getElementById("coinSpin"),
+  wagerResult: document.getElementById("wagerResult"),
   log: document.getElementById("log"),
   gameMsg: document.getElementById("gameMsg"),
 };
@@ -62,6 +73,21 @@ const confetti = {
   parts: [],
   raf: 0,
 };
+
+const PIECE_GLYPH_MONO = {
+  p: "♙",
+  n: "♘",
+  b: "♗",
+  r: "♖",
+  q: "♕",
+  k: "♔",
+};
+
+function sqToAlg(sq) {
+  const file = sq % 8;
+  const rank = Math.floor(sq / 8);
+  return String.fromCharCode(97 + file) + String(rank + 1);
+}
 
 function stopConfetti() {
   confetti.running = false;
@@ -432,12 +458,16 @@ function draw() {
   const msg =
     s.phase === "ruleChoice"
       ? "Rule choice!"
+      : s.phase === "bonusRuleChoice"
+        ? "Bonus rule picks!"
       : s.phase === "targetRule"
         ? s.pendingTargetRule?.playerId === state.playerId
           ? (s.pendingTargetRule.prompt || "Choose a target")
           : "Opponent choosing a rule target"
       : s.phase === "rps"
         ? "RPS Duel!"
+      : s.phase === "wager"
+        ? "Coinflip Wager!"
       : s.result
         ? s.result
         : yourTurn
@@ -729,15 +759,177 @@ function renderRps() {
   if (els.rpsScissorsBtn) els.rpsScissorsBtn.disabled = disable;
 }
 
+function updateWagerTimer() {
+  const s = state.serverState;
+  if (!s || els.wagerModal.hidden) return;
+  const w = s.wager;
+  if (!w) {
+    if (els.wagerTimer) els.wagerTimer.textContent = "";
+    return;
+  }
+  if (w.stage === "flip" && els.coinSpin) {
+    els.coinSpin.textContent = Math.floor(Date.now() / 220) % 2 === 0 ? "HEADS" : "TAILS";
+  }
+  if (w.stage !== "select") {
+    if (els.wagerTimer) els.wagerTimer.textContent = "";
+    return;
+  }
+  if (!w.deadlineMs) {
+    els.wagerTimer.textContent = "";
+    return;
+  }
+  const remainingMs = Math.max(0, w.deadlineMs - Date.now());
+  els.wagerTimer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
+}
+
+function renderWager() {
+  const s = state.serverState;
+  const active = !!s?.wager?.active && s?.phase === "wager";
+  els.wagerModal.hidden = !active;
+  if (!active) {
+    if (els.wagerYouGrid) els.wagerYouGrid.innerHTML = "";
+    if (els.wagerOppGrid) els.wagerOppGrid.innerHTML = "";
+    if (els.wagerStatus) els.wagerStatus.textContent = "";
+    if (els.wagerResult) els.wagerResult.textContent = "";
+    if (els.coinAssign) els.coinAssign.textContent = "";
+    if (els.wagerTimer) els.wagerTimer.textContent = "";
+    if (els.coinArea) els.coinArea.hidden = true;
+    if (els.coinSpin) els.coinSpin.classList.remove("stopped");
+    return;
+  }
+
+  const w = s.wager;
+  updateWagerTimer();
+
+  const you = state.color;
+  const opp = otherColor(you);
+  const selections = w.selectedByColor || {};
+  const confirmed = w.confirmedByColor || {};
+  const youConfirmed = you ? !!confirmed[you] : false;
+  const oppConfirmed = opp ? !!confirmed[opp] : false;
+
+  if (els.wagerStatus) {
+    if (w.stage === "select") {
+      const youCount = you ? ((selections[you] || []).length || 0) : 0;
+      const oppCount = opp ? ((selections[opp] || []).length || 0) : 0;
+      els.wagerStatus.textContent = `Select any of your pieces to wager (kings can't be wagered). You: ${youCount} selected (${youConfirmed ? "confirmed" : "choosing"}) | Opponent: ${oppCount} selected (${oppConfirmed ? "confirmed" : "choosing"})`;
+    } else if (w.stage === "flip") {
+      els.wagerStatus.textContent = "Coin flipping...";
+    } else {
+      els.wagerStatus.textContent = "Result!";
+    }
+  }
+
+  const selectedSet = new Set((you ? selections[you] : []) || []);
+
+  const canPick = w.stage === "select" && !youConfirmed;
+
+  const buildGrid = (container, items, { interactive }) => {
+    if (!container) return;
+    container.innerHTML = "";
+    for (const item of items) {
+      const btn = document.createElement("div");
+      const isSelected = selectedSet.has(item.sq);
+      btn.className = `wagerPiece${isSelected ? " selected" : ""}`;
+      const glyph = PIECE_GLYPH_MONO[item.p.type] || "?";
+      btn.innerHTML = `<div class="wagerGlyph">${glyph}</div><div class="wagerMeta">${escapeHtml(item.p.type.toUpperCase())} · ${escapeHtml(sqToAlg(item.sq))}</div>`;
+      if (!interactive) btn.style.opacity = "0.78";
+      if (interactive) {
+        btn.addEventListener("click", () => {
+          if (!canPick) return;
+          if (selectedSet.has(item.sq)) selectedSet.delete(item.sq);
+          else selectedSet.add(item.sq);
+          const next = [...selectedSet];
+          socket.emit("game:wagerSelection", { code: state.lobby, playerId: state.playerId, squares: next }, (res) => {
+            if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "wager selection failed")}`);
+            socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+          });
+        });
+      }
+      container.appendChild(btn);
+    }
+  };
+
+  const yourSquares = [];
+  const oppSquares = [];
+  for (let sq = 0; sq < 64; sq++) {
+    const p = s.board?.[sq];
+    if (!p) continue;
+    if (p.color === "x") continue;
+    if (p.type === "k") continue;
+    if (p.color === you) yourSquares.push({ sq, p });
+  }
+  yourSquares.sort((a, b) => a.sq - b.sq);
+  buildGrid(els.wagerYouGrid, yourSquares, { interactive: true });
+
+  const oppSelected = new Set((opp ? selections[opp] : []) || []);
+  for (const sq of oppSelected) {
+    const p = s.board?.[sq];
+    if (!p) continue;
+    if (p.color !== opp) continue;
+    if (p.color === "x" || p.type === "k") continue;
+    oppSquares.push({ sq, p });
+  }
+  oppSquares.sort((a, b) => a.sq - b.sq);
+  buildGrid(els.wagerOppGrid, oppSquares, { interactive: false });
+
+  if (els.wagerConfirmBtn) {
+    els.wagerConfirmBtn.hidden = false;
+    if (w.stage === "select") {
+      const enabled = !youConfirmed && state.lobby && state.playerId;
+      els.wagerConfirmBtn.disabled = !enabled;
+      els.wagerConfirmBtn.textContent = youConfirmed ? "Waiting for opponent..." : "Confirm wager";
+    } else if (w.stage === "flip") {
+      els.wagerConfirmBtn.disabled = true;
+      els.wagerConfirmBtn.textContent = "Flipping coin...";
+    } else {
+      els.wagerConfirmBtn.disabled = true;
+      els.wagerConfirmBtn.textContent = "Wager complete";
+    }
+  }
+
+  if (els.coinArea) els.coinArea.hidden = w.stage === "select";
+  if (w.stage !== "select") {
+    const assign = w.assignedByColor?.[you] || "";
+    if (els.coinAssign) els.coinAssign.textContent = assign ? `You are ${assign.toUpperCase()}` : "";
+    if (els.coinSpin) {
+      if (w.stage === "result") els.coinSpin.classList.add("stopped");
+      else els.coinSpin.classList.remove("stopped");
+
+      if (w.stage === "flip") {
+        els.coinSpin.textContent = Math.floor(Date.now() / 220) % 2 === 0 ? "HEADS" : "TAILS";
+      } else if (w.outcome) {
+        els.coinSpin.textContent = String(w.outcome).toUpperCase();
+      }
+    }
+    if (els.wagerResult) {
+      if (w.stage === "flip") els.wagerResult.textContent = "";
+      else if (w.winner) els.wagerResult.textContent = `${w.winner === you ? "You win!" : "You lose!"}`;
+      else els.wagerResult.textContent = "";
+    }
+  }
+}
+
 function renderChoice() {
   const s = state.serverState;
   const choice = (s.ruleChoicesByPlayerId || {})[state.playerId];
-  const needsChoice = s.phase === "ruleChoice" && !!choice && !s.ruleChosenByPlayerId?.[state.playerId];
+  const needsChoice =
+    (s.phase === "ruleChoice" && !!choice && !s.ruleChosenByPlayerId?.[state.playerId]) ||
+    (s.phase === "bonusRuleChoice" && !!choice && choice.length > 0);
 
   els.choiceArea.hidden = !needsChoice;
   document.body.classList.toggle("is-choosing", needsChoice);
   document.body.classList.toggle("is-debug-choice", needsChoice && choice.length > 3);
   els.choiceCards.classList.toggle("debugChoice", needsChoice && choice.length > 3);
+  if (els.choiceTitle) {
+    if (!needsChoice) els.choiceTitle.textContent = "Pick a rule";
+    else if (s.phase === "bonusRuleChoice") {
+      const left = s.bonusRuleChoice?.remainingPicks ?? "?";
+      els.choiceTitle.textContent = `Pick a bonus rule (${left} left)`;
+    } else {
+      els.choiceTitle.textContent = "Pick a rule";
+    }
+  }
   if (!needsChoice) {
     els.choiceCards.innerHTML = "";
     state.lastChoiceKey = null;
@@ -813,6 +1005,7 @@ function syncUI() {
   renderCards();
   renderChoice();
   renderRps();
+  renderWager();
 
   // Result modal.
   const ri = s.resultInfo;
@@ -968,6 +1161,14 @@ els.rpsRockBtn?.addEventListener("click", () => sendRpsChoice("rock"));
 els.rpsPaperBtn?.addEventListener("click", () => sendRpsChoice("paper"));
 els.rpsScissorsBtn?.addEventListener("click", () => sendRpsChoice("scissors"));
 
+els.wagerConfirmBtn?.addEventListener("click", () => {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:wagerConfirm", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "wager confirm failed")}`);
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+});
+
 els.canvas.addEventListener("mousedown", (ev) => {
   if (!state.serverState || !state.lobby) return;
   const s = state.serverState;
@@ -1023,6 +1224,7 @@ setInterval(() => {
   if (!state.serverState) return;
   updateChoiceTimer();
   updateRpsTimer();
+  updateWagerTimer();
 }, 250);
 
 // Fallback sync: if we haven't seen a state update recently, request one.

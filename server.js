@@ -227,6 +227,32 @@ io.on("connection", (socket) => {
     pushEffectsAndState(code);
   });
 
+  socket.on("game:wagerSelection", ({ code, playerId, squares } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.setWagerSelection(pid, squares);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:wagerConfirm", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.confirmWager(pid);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
   socket.on("game:ready", ({ code, playerId } = {}, cb) => {
     const entry = rooms.get(code);
     if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
@@ -269,7 +295,9 @@ setInterval(() => {
     const beforePhase = g.phase;
     const beforeEffectSeq = g.effectSeq;
     g.enforceRuleChoiceTimeoutIfNeeded();
+    g.enforceBonusRuleChoiceTimeoutIfNeeded();
     g.enforceMiniGameTimeoutIfNeeded();
+    g.enforceWagerTimeoutIfNeeded();
     const changed = beforePhase !== g.phase || beforeEffectSeq !== g.effectSeq;
     if (changed) pushEffectsAndState(code);
   }

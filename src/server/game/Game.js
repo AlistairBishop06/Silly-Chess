@@ -71,7 +71,7 @@ class Game {
 
     this.state = initialState();
     this.ply = 0;
-    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "rps"
+    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "rps" | "wager"
 
     this.result = null;
     this.resultInfo = null;
@@ -140,6 +140,8 @@ class Game {
     this.lastMoveSquares = [];
     this.history = [];
     this.rps = null;
+    this.wager = null;
+    this.bonusRuleChoice = null; // { playerId, remainingPicks }
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
@@ -190,6 +192,7 @@ class Game {
     this.pendingTargetRules.shift();
     this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
     this.evaluateGameEnd();
+    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
     return { ok: true };
   }
 
@@ -318,6 +321,47 @@ class Game {
   }
 
   chooseRule(playerId, ruleId) {
+    if (this.phase === "bonusRuleChoice") {
+      if (!this.bonusRuleChoice || this.bonusRuleChoice.playerId !== playerId) return { ok: false, error: "No bonus choices for you" };
+      if (this.bonusRuleChoice.remainingPicks <= 0) return { ok: false, error: "No bonus picks left" };
+      const choice = this.ruleChoicesByPlayerId[playerId] || [];
+      if (!choice.some((r) => r.id === ruleId)) return { ok: false, error: "Invalid choice" };
+
+      const color = this.playerColor(playerId);
+      const name = getRuleById(ruleId)?.name || ruleId;
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: `Bonus rule picked: ${name}` });
+      this.ruleManager.addRule(ruleId, { playerId, color });
+
+      this.bonusRuleChoice.remainingPicks -= 1;
+      if (this.bonusRuleChoice.remainingPicks > 0) {
+        if (this.phase !== "bonusRuleChoice") {
+          // A mini-game / interrupting phase took over; resume bonus picks once we're back to play.
+          this.ruleChoicesByPlayerId = {};
+          this.ruleChosenByPlayerId = {};
+          this.ruleChoiceDeadlineMs = null;
+          return { ok: true };
+        }
+        // Refresh choices (exclude Pot of Greed to avoid infinite loops).
+        this.ruleChoicesByPlayerId = {
+          [playerId]: this.ruleManager.allChoices().filter((r) => r.id !== "inst_pot_of_greed"),
+        };
+        this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;
+        return { ok: true };
+      }
+
+      // End bonus choice unless a mini-game took over the phase.
+      this.bonusRuleChoice = null;
+      this.ruleChoicesByPlayerId = {};
+      this.ruleChosenByPlayerId = {};
+      this.ruleChoiceDeadlineMs = null;
+      if (this.phase === "bonusRuleChoice") {
+        this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+        if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+      }
+      this.evaluateGameEnd();
+      return { ok: true };
+    }
+
     if (this.phase !== "ruleChoice") return { ok: false, error: "Not choosing rules right now" };
     if (!this.ruleChoicesByPlayerId[playerId]) return { ok: false, error: "No choices for you" };
     if (this.ruleChosenByPlayerId[playerId]) return { ok: false, error: "Already chosen" };
@@ -339,20 +383,52 @@ class Game {
     const picks = [];
     if (white) picks.push({ player: white, ruleId: this.ruleChosenByPlayerId[white.id] });
     if (black) picks.push({ player: black, ruleId: this.ruleChosenByPlayerId[black.id] });
+    this.ruleChoicesByPlayerId = {};
+    this.ruleChosenByPlayerId = {};
+    this.ruleChoiceDeadlineMs = null;
+
     for (const pick of picks) {
       if (pick.ruleId) this.ruleManager.addRule(pick.ruleId, { playerId: pick.player.id, color: pick.player.color });
     }
 
-    this.ruleChoicesByPlayerId = {};
-    this.ruleChosenByPlayerId = {};
-    this.ruleChoiceDeadlineMs = null;
-    if (this.pendingTargetRules.length) this.phase = "targetRule";
-    else if (this.phase === beforePhase) this.phase = "play";
+    if (this.phase === beforePhase) {
+      this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+    }
+    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
     this.evaluateGameEnd();
+  }
+
+  resumeBonusRuleChoiceIfNeeded() {
+    if (!this.bonusRuleChoice || this.bonusRuleChoice.remainingPicks <= 0) return false;
+    const pid = this.bonusRuleChoice.playerId;
+    if (!pid) return false;
+    this.phase = "bonusRuleChoice";
+    this.ruleChoicesByPlayerId = {
+      [pid]: this.ruleManager.allChoices().filter((r) => r.id !== "inst_pot_of_greed"),
+    };
+    this.ruleChosenByPlayerId = {};
+    this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;
+    return true;
+  }
+
+  startBonusRuleChoice(playerId, extraPicks = 2) {
+    if (!this.started || this.result) return { ok: false, error: "Game not active" };
+    if (!playerId) return { ok: false, error: "Bad player" };
+
+    if (!this.bonusRuleChoice || this.bonusRuleChoice.playerId !== playerId) {
+      this.bonusRuleChoice = { playerId, remainingPicks: Math.max(1, Number(extraPicks) || 0) };
+    } else {
+      this.bonusRuleChoice.remainingPicks += Math.max(1, Number(extraPicks) || 0);
+    }
+
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Pot of Greed! Pick ${this.bonusRuleChoice.remainingPicks} extra rule(s).` });
+    this.resumeBonusRuleChoiceIfNeeded();
+    return { ok: true };
   }
 
   maybeStartRuleChoice() {
     if (!this.started || this.result) return;
+    if (this.phase !== "play") return;
     if (this.ply > 0 && this.ply % this.ruleChoiceEveryPlies === 0) {
       this.phase = "ruleChoice";
       this.ruleChoicesByPlayerId = {};
@@ -378,6 +454,33 @@ class Game {
     }
     this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rule choice timed out; auto-picked." });
     this.applyChosenRulesAndResume();
+  }
+
+  enforceBonusRuleChoiceTimeoutIfNeeded() {
+    if (this.phase !== "bonusRuleChoice") return;
+    if (!this.bonusRuleChoice || this.bonusRuleChoice.remainingPicks <= 0) {
+      this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+      return;
+    }
+    if (this.ruleChoiceDeadlineMs == null) return;
+    if (Date.now() < this.ruleChoiceDeadlineMs) return;
+
+    const pid = this.bonusRuleChoice.playerId;
+    const choice = this.ruleChoicesByPlayerId[pid] || [];
+    const pick = choice[Math.floor(Math.random() * Math.max(1, choice.length))];
+    if (pick) {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Bonus rule choice timed out; auto-picked." });
+      this.chooseRule(pid, pick.id);
+      return;
+    }
+
+    // Nothing to pick; end bonus choice.
+    this.bonusRuleChoice.remainingPicks = 0;
+    this.bonusRuleChoice = null;
+    this.ruleChoicesByPlayerId = {};
+    this.ruleChosenByPlayerId = {};
+    this.ruleChoiceDeadlineMs = null;
+    this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
   }
 
   enforceMiniGameTimeoutIfNeeded() {
@@ -474,6 +577,133 @@ class Game {
     this.rps = null;
     this.phase = "play";
     this.evaluateGameEnd();
+    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+  }
+
+  enforceWagerTimeoutIfNeeded() {
+    if (this.phase !== "wager" || !this.wager) return;
+
+    const now = Date.now();
+
+    if (this.wager.stage === "select") return;
+
+    if (this.wager.stage === "flip") {
+      if (this.wager.resolveAtMs != null && now >= this.wager.resolveAtMs) {
+        this.applyWagerResult();
+      }
+      return;
+    }
+
+    if (this.wager.stage === "result") {
+      if (this.wager.closeAtMs != null && now >= this.wager.closeAtMs) {
+        this.wager = null;
+        this.phase = "play";
+        this.evaluateGameEnd();
+        if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+      }
+    }
+  }
+
+  startCoinflipWager() {
+    if (!this.started || this.result) return { ok: false, error: "Game not active" };
+    if (this.players.length !== 2) return { ok: false, error: "Need two players" };
+    if (this.wager) return { ok: false, error: "Wager already running" };
+
+    this.phase = "wager";
+    this.wager = {
+      stage: "select",
+      selectedByColor: { w: [], b: [] },
+      confirmedByColor: { w: false, b: false },
+      assignedByColor: null, // { w: "heads"|"tails", b: "heads"|"tails" }
+      outcome: null, // "heads"|"tails"
+      winner: null,
+      loser: null,
+      deadlineMs: null,
+      resolveAtMs: null,
+      closeAtMs: null,
+    };
+
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: "Coinflip Wager! Select pieces to wager, then confirm." });
+    return { ok: true };
+  }
+
+  setWagerSelection(playerId, squares) {
+    if (this.phase !== "wager" || !this.wager) return { ok: false, error: "No wager active" };
+    if (this.wager.stage !== "select") return { ok: false, error: "Wager already locked in" };
+
+    const color = this.playerColor(playerId);
+    if (color !== "w" && color !== "b") return { ok: false, error: "Not a player" };
+    if (this.wager.confirmedByColor[color]) return { ok: false, error: "Already confirmed" };
+
+    const raw = Array.isArray(squares) ? squares : [];
+    const uniq = [...new Set(raw.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n >= 0 && n <= 63))];
+    if (uniq.length > 63) return { ok: false, error: "Too many pieces" };
+
+    for (const sq of uniq) {
+      const p = this.state.board[sq];
+      if (!p || p.color !== color || p.color === "x") return { ok: false, error: "Selections must be your own pieces" };
+      if (p.type === "k") return { ok: false, error: "You can't wager your king" };
+    }
+
+    this.wager.selectedByColor[color] = uniq;
+    return { ok: true };
+  }
+
+  confirmWager(playerId) {
+    if (this.phase !== "wager" || !this.wager) return { ok: false, error: "No wager active" };
+    if (this.wager.stage !== "select") return { ok: false, error: "Wager already locked in" };
+
+    const color = this.playerColor(playerId);
+    if (color !== "w" && color !== "b") return { ok: false, error: "Not a player" };
+
+    this.wager.confirmedByColor[color] = true;
+    this.beginWagerFlipIfReady();
+    return { ok: true };
+  }
+
+  beginWagerFlipIfReady() {
+    if (!this.wager || this.wager.stage !== "select") return;
+    if (!this.wager.confirmedByColor.w || !this.wager.confirmedByColor.b) return;
+
+    const wIsHeads = Math.random() < 0.5;
+    this.wager.assignedByColor = { w: wIsHeads ? "heads" : "tails", b: wIsHeads ? "tails" : "heads" };
+    this.wager.outcome = Math.random() < 0.5 ? "heads" : "tails";
+    const winner = this.wager.assignedByColor.w === this.wager.outcome ? "w" : "b";
+    const loser = winner === "w" ? "b" : "w";
+    this.wager.winner = winner;
+    this.wager.loser = loser;
+
+    this.wager.stage = "flip";
+    this.wager.resolveAtMs = Date.now() + 2_500;
+    this.wager.closeAtMs = this.wager.resolveAtMs + 2_000;
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: "Coin flipped..." });
+  }
+
+  applyWagerResult() {
+    if (!this.wager || this.wager.stage !== "flip") return;
+    const winner = this.wager.winner;
+    const loser = this.wager.loser;
+    if (winner !== "w" && winner !== "b") return;
+    if (loser !== "w" && loser !== "b") return;
+
+    const squares = this.wager.selectedByColor[loser] || [];
+    let changed = 0;
+    for (const sq of squares) {
+      const p = this.state.board[sq];
+      if (!p) continue;
+      if (p.color !== loser) continue;
+      if (p.color === "x" || p.type === "k") continue;
+      this.state.board[sq] = { ...p, color: winner };
+      changed += 1;
+    }
+
+    this.effects.push({
+      type: "rule",
+      id: this.nextEffectId(),
+      text: `Coinflip Wager: ${winner === "w" ? "White" : "Black"} wins (${this.wager.outcome}). ${changed} piece(s) switched sides.`,
+    });
+
+    this.wager.stage = "result";
   }
 
   randomPieceSquare(color, filterFn) {
@@ -1198,7 +1428,9 @@ class Game {
 
   toClientState() {
     this.enforceRuleChoiceTimeoutIfNeeded();
+    this.enforceBonusRuleChoiceTimeoutIfNeeded();
     this.enforceMiniGameTimeoutIfNeeded();
+    this.enforceWagerTimeoutIfNeeded();
     const mods = this.currentModifiers();
     const inCheck = require("./ChessEngine").isInCheck(this.state, this.state.turn, mods);
     const checkLabel = inCheck ? (this.state.turn === "w" ? "White" : "Black") : null;
@@ -1272,6 +1504,24 @@ class Game {
         : null,
       rps: this.rps
         ? { active: true, round: this.rps.round, pickedByColor: { ...this.rps.pickedByColor }, deadlineMs: this.rps.deadlineMs }
+        : null,
+      bonusRuleChoice: this.bonusRuleChoice
+        ? { active: true, playerId: this.bonusRuleChoice.playerId, remainingPicks: this.bonusRuleChoice.remainingPicks, deadlineMs: this.ruleChoiceDeadlineMs }
+        : null,
+      wager: this.wager
+        ? {
+            active: true,
+            stage: this.wager.stage,
+            selectedByColor: { ...this.wager.selectedByColor },
+            confirmedByColor: { ...this.wager.confirmedByColor },
+            assignedByColor: this.wager.assignedByColor ? { ...this.wager.assignedByColor } : null,
+            outcome: this.wager.outcome,
+            winner: this.wager.winner,
+            loser: this.wager.loser,
+            deadlineMs: this.wager.deadlineMs,
+            resolveAtMs: this.wager.resolveAtMs,
+            closeAtMs: this.wager.closeAtMs,
+          }
         : null,
       lastMove: this.state.lastMove || null,
       resultInfo: this.resultInfo,

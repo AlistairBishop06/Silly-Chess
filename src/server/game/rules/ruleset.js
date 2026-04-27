@@ -103,6 +103,24 @@ function idxToAlg(idx) {
 const RULES = [
   // 🔴 Instant (original 17 + 5 new)
   {
+    id: "inst_pot_of_greed",
+    kind: "instant",
+    name: "Pot of Greed",
+    description: "Pick 2 extra rules immediately.",
+    apply(game, ctx) {
+      game.startBonusRuleChoice?.(ctx?.playerId, 2);
+    },
+  },
+  {
+    id: "inst_coinflip_wager",
+    kind: "instant",
+    name: "Coinflip Wager",
+    description: "Both players wager pieces on a coin flip. Loserâ€™s wagered pieces switch sides.",
+    apply(game) {
+      game.startCoinflipWager?.();
+    },
+  },
+  {
     id: "inst_oops_explosion",
     kind: "instant",
     name: "Oops Explosion",
