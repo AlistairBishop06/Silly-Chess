@@ -14,9 +14,11 @@ function createLobbyCode(isTaken) {
   return `${Date.now().toString(36).toUpperCase().slice(-6)}`;
 }
 
-function createRoom(code) {
+function createRoom(code, { visibility = "private" } = {}) {
   return {
     code,
+    visibility: visibility === "public" ? "public" : "private",
+    createdAt: Date.now(),
     players: [],
     game: null,
     addPlayer(socketId, name) {
@@ -48,4 +50,3 @@ module.exports = {
   joinRoom,
   leaveRoom,
 };
-

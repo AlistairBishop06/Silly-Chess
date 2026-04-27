@@ -119,6 +119,30 @@ function pushEffectsAndState(roomCode) {
   entry.room.game.clearTransientEffects();
 }
 
+function getOpenPublicServers() {
+  return [...rooms.values()]
+    .map((entry) => entry.room)
+    .filter(
+      (room) =>
+        room.visibility === "public" &&
+        room.players.length < 2 &&
+        room.players.some((player) => !!player.socketId) &&
+        !room.game?.started
+    )
+    .map((room) => ({
+      code: room.code,
+      host: room.players[0]?.name || "Player 1",
+      players: room.players.length,
+      maxPlayers: 2,
+      createdAt: room.createdAt || 0,
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function emitOpenServers() {
+  io.emit("lobby:openServers", { servers: getOpenPublicServers() });
+}
+
 io.on("connection", (socket) => {
   socket.on("game:sync", ({ code, playerId } = {}, cb) => {
     const entry = rooms.get(code);
@@ -159,11 +183,18 @@ io.on("connection", (socket) => {
 
     rooms.delete(code);
     cb?.({ ok: true });
+    emitOpenServers();
   });
 
-  socket.on("lobby:create", ({ name } = {}, cb) => {
+  socket.on("lobby:listOpen", (_payload, cb) => {
+    const payload = { ok: true, servers: getOpenPublicServers() };
+    cb?.(payload);
+    socket.emit("lobby:openServers", { servers: payload.servers });
+  });
+
+  socket.on("lobby:create", ({ name, visibility } = {}, cb) => {
     const code = createLobbyCode((c) => rooms.has(c));
-    const room = createRoom(code);
+    const room = createRoom(code, { visibility });
     room.game = new Game({ roomCode: code, debugMode: DEBUG_MODE });
     rooms.set(code, { room, socketsByPlayerId: new Map() });
 
@@ -173,6 +204,7 @@ io.on("connection", (socket) => {
 
     cb?.({ ok: true, code, playerId: player.id, color: player.color });
     pushEffectsAndState(code);
+    emitOpenServers();
   });
 
   socket.on("lobby:join", ({ code, name } = {}, cb) => {
@@ -191,6 +223,7 @@ io.on("connection", (socket) => {
       room.game.start(room.players);
     }
     pushEffectsAndState(code);
+    emitOpenServers();
   });
 
   socket.on("game:requestMoves", ({ code, playerId, from } = {}, cb) => {
@@ -311,7 +344,12 @@ io.on("connection", (socket) => {
       // If everyone is gone for a while, remove the room.
       const allGone = room.players.length > 0 && room.players.every((p) => !p.socketId);
       const oldestGoneAt = Math.min(...room.players.map((p) => p.disconnectedAt || Date.now()));
-      if (allGone && Date.now() - oldestGoneAt > 2 * 60_000) rooms.delete(code);
+      if (allGone && Date.now() - oldestGoneAt > 2 * 60_000) {
+        rooms.delete(code);
+        emitOpenServers();
+      } else {
+        emitOpenServers();
+      }
     }
   });
 });

@@ -6,8 +6,17 @@ const els = {
   status: document.getElementById("status"),
   name: document.getElementById("nameInput"),
   createBtn: document.getElementById("createBtn"),
+  createModal: document.getElementById("createModal"),
+  createCloseBtn: document.getElementById("createCloseBtn"),
+  createPublicBtn: document.getElementById("createPublicBtn"),
+  createPrivateBtn: document.getElementById("createPrivateBtn"),
   code: document.getElementById("codeInput"),
   joinBtn: document.getElementById("joinBtn"),
+  joinModal: document.getElementById("joinModal"),
+  joinCloseBtn: document.getElementById("joinCloseBtn"),
+  joinCodeBtn: document.getElementById("joinCodeBtn"),
+  refreshServersBtn: document.getElementById("refreshServersBtn"),
+  openServers: document.getElementById("openServers"),
   rulebookBtn: document.getElementById("rulebookBtn"),
   rulebookModal: document.getElementById("rulebookModal"),
   rulebookCloseBtn: document.getElementById("rulebookCloseBtn"),
@@ -73,6 +82,7 @@ const state = {
   lastRematchId: null,
   pendingTargetKey: null,
   cachedRulebook: null,
+  openServers: [],
 };
 
 const confetti = {
@@ -997,6 +1007,91 @@ function closeRulebook() {
   els.rulebookModal.hidden = true;
 }
 
+function requestOpenServers() {
+  socket.emit("lobby:listOpen", {}, (res) => {
+    if (!res?.ok) {
+      logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "server list failed")}`);
+      return;
+    }
+    state.openServers = Array.isArray(res.servers) ? res.servers : [];
+    renderOpenServers();
+  });
+}
+
+function openCreateModal() {
+  if (!els.createModal) return;
+  els.createModal.hidden = false;
+}
+
+function closeCreateModal() {
+  if (!els.createModal) return;
+  els.createModal.hidden = true;
+}
+
+function createLobby(visibility) {
+  socket.emit("lobby:create", { name: els.name.value.trim(), visibility }, (res) => {
+    if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "create failed")}`);
+    closeCreateModal();
+    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
+    els.code.value = "";
+    const visibilityText = visibility === "public" ? "public" : "private";
+    logLine(`<strong>Lobby</strong>: Created ${visibilityText} lobby <strong>${res.code}</strong>`);
+  });
+}
+
+function openJoinModal() {
+  if (!els.joinModal) return;
+  els.joinModal.hidden = false;
+  requestOpenServers();
+  setTimeout(() => els.code?.focus(), 0);
+}
+
+function closeJoinModal() {
+  if (!els.joinModal) return;
+  els.joinModal.hidden = true;
+}
+
+function joinLobbyCode(code) {
+  const normalized = String(code || "").trim().toUpperCase();
+  if (!normalized) return logLine(`<strong>Error</strong>: Enter a lobby code.`);
+  socket.emit("lobby:join", { code: normalized, name: els.name.value.trim() }, (res) => {
+    if (!res?.ok) {
+      requestOpenServers();
+      return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "join failed")}`);
+    }
+    closeJoinModal();
+    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
+    logLine(`<strong>Lobby</strong>: Joined <strong>${res.code}</strong>`);
+  });
+}
+
+function renderOpenServers() {
+  if (!els.openServers) return;
+  const servers = state.openServers || [];
+  if (!servers.length) {
+    els.openServers.innerHTML = `<div class="emptyServers">No public servers are waiting.</div>`;
+    return;
+  }
+  els.openServers.innerHTML = "";
+  for (const server of servers) {
+    const row = document.createElement("div");
+    row.className = "serverRow";
+    const meta = document.createElement("div");
+    meta.className = "serverMeta";
+    const host = document.createElement("strong");
+    host.textContent = server.host || "Player 1";
+    const count = document.createElement("span");
+    count.textContent = `${server.players || 0}/${server.maxPlayers || 2} players`;
+    meta.append(host, count);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Join";
+    btn.addEventListener("click", () => joinLobbyCode(server.code));
+    row.append(meta, btn);
+    els.openServers.appendChild(row);
+  }
+}
+
 function syncUI() {
   const s = state.serverState;
   const connected = !!state.lobby;
@@ -1158,6 +1253,11 @@ socket.on("game:state", (s) => {
   syncUI();
 });
 
+socket.on("lobby:openServers", (payload) => {
+  state.openServers = Array.isArray(payload?.servers) ? payload.servers : [];
+  renderOpenServers();
+});
+
 els.rulebookBtn?.addEventListener("click", () => {
   openRulebook();
 });
@@ -1169,21 +1269,28 @@ els.rulebookModal?.addEventListener("mousedown", (ev) => {
 });
 
 els.createBtn.addEventListener("click", () => {
-  socket.emit("lobby:create", { name: els.name.value.trim() }, (res) => {
-    if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "create failed")}`);
-    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
-    els.code.value = "";
-    logLine(`<strong>Lobby</strong>: Created <strong>${res.code}</strong>`);
-  });
+  openCreateModal();
+});
+
+els.createPublicBtn?.addEventListener("click", () => createLobby("public"));
+els.createPrivateBtn?.addEventListener("click", () => createLobby("private"));
+els.createCloseBtn?.addEventListener("click", () => closeCreateModal());
+els.createModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.createModal) closeCreateModal();
 });
 
 els.joinBtn.addEventListener("click", () => {
-  const code = els.code.value.trim().toUpperCase();
-  socket.emit("lobby:join", { code, name: els.name.value.trim() }, (res) => {
-    if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "join failed")}`);
-    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
-    logLine(`<strong>Lobby</strong>: Joined <strong>${res.code}</strong>`);
-  });
+  openJoinModal();
+});
+
+els.joinCodeBtn?.addEventListener("click", () => joinLobbyCode(els.code.value));
+els.refreshServersBtn?.addEventListener("click", () => requestOpenServers());
+els.joinCloseBtn?.addEventListener("click", () => closeJoinModal());
+els.joinModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.joinModal) closeJoinModal();
+});
+els.code?.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !els.joinModal?.hidden) joinLobbyCode(els.code.value);
 });
 
 els.leaveBtn?.addEventListener("click", () => {

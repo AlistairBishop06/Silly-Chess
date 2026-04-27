@@ -405,7 +405,7 @@ body.is-connected .status::before {
 
 .joinGrid {
   display: grid;
-  grid-template-columns: minmax(150px, 0.7fr) minmax(140px, 1fr) auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
   align-items: end;
   gap: 10px;
 }
@@ -1370,6 +1370,112 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   flex-direction: column;
 }
 
+.createServerCard {
+  width: min(560px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.createChoiceGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.createChoice {
+  min-height: 124px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 8px;
+  text-align: left;
+  white-space: normal;
+}
+
+.createChoice strong,
+.createChoice span {
+  display: block;
+}
+
+.createChoice strong {
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.createChoice span {
+  color: rgba(249, 251, 255, 0.68);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.createChoice.primaryBtn span {
+  color: rgba(17, 24, 39, 0.72);
+}
+
+.joinServerCard {
+  width: min(720px, 94vw);
+  max-height: min(82vh, 620px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.privateJoinRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.openServersHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.openServers {
+  min-height: 160px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.serverRow,
+.emptyServers {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px;
+}
+
+.serverRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.serverMeta {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.serverMeta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.serverMeta span,
+.emptyServers {
+  color: rgba(249, 251, 255, 0.64);
+  font-size: 13px;
+}
+
 .rulebookActions {
   display: flex;
   gap: 10px;
@@ -1471,11 +1577,15 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   }
 
   .joinGrid {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr;
   }
 
-  .joinGrid .primaryBtn {
-    grid-column: 1 / -1;
+  .createChoiceGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .privateJoinRow {
+    grid-template-columns: 1fr;
   }
 
   body.is-in-game #gamePanel {

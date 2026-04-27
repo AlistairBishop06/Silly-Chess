@@ -44,15 +44,11 @@
                 <input id="nameInput" placeholder="Name" maxlength="16" autocomplete="nickname" />
               </div>
               <div class="joinGrid">
-                <button id="createBtn" class="primaryBtn">Create lobby</button>
-                <div class="fieldStack codeField">
-                  <label for="codeInput">Lobby code</label>
-                  <input id="codeInput" placeholder="Code" maxlength="6" autocomplete="off" />
-                </div>
-                <button id="joinBtn">Join</button>
+                <button id="createBtn" class="primaryBtn" type="button">Create Server</button>
+                <button id="joinBtn" type="button">Join server</button>
               </div>
               <div class="hint">
-                Create a lobby and share the code, or enter a code to jump into an existing match.
+                Public lobbies appear in the open server list. Private lobbies use a code.
               </div>
             </div>
 
@@ -208,6 +204,50 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="createModal" class="modal" hidden>
+      <div class="modalCard createServerCard">
+        <div class="cardsHeader">
+          <h3>Create server</h3>
+          <div class="rulebookActions">
+            <button id="createCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="createChoiceGrid">
+          <button id="createPublicBtn" class="createChoice primaryBtn" type="button">
+            <strong>Public</strong>
+            <span>Appears in the open server list.</span>
+          </button>
+          <button id="createPrivateBtn" class="createChoice" type="button">
+            <strong>Private</strong>
+            <span>Join only with the lobby code.</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="joinModal" class="modal" hidden>
+      <div class="modalCard joinServerCard">
+        <div class="cardsHeader">
+          <h3>Join server</h3>
+          <div class="rulebookActions">
+            <button id="joinCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="privateJoinRow">
+          <div class="fieldStack">
+            <label for="codeInput">Private code</label>
+            <input id="codeInput" placeholder="Code" maxlength="6" autocomplete="off" />
+          </div>
+          <button id="joinCodeBtn" type="button">Join code</button>
+        </div>
+        <div class="openServersHeader">
+          <h3>Open public servers</h3>
+          <button id="refreshServersBtn" type="button">Refresh</button>
+        </div>
+        <div id="openServers" class="openServers"></div>
+      </div>
     </div>
 
     <div id="rulebookModal" class="modal" hidden>
