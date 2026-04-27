@@ -44,8 +44,9 @@ const HILL_SQUARES = new Set([
 const HILL_PROMOTION = { p: "n", n: "b", b: "r", r: "q", q: "q" };
 
 class Game {
-  constructor({ roomCode }) {
+  constructor({ roomCode, debugMode = false }) {
     this.roomCode = roomCode;
+    this.debugMode = !!debugMode;
     this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 7));
     this.ruleChoiceDurationMs = Math.max(5_000, Number(process.env.RULE_CHOICE_DURATION_MS || 30_000));
 
@@ -196,7 +197,10 @@ class Game {
       this.phase = "ruleChoice";
       this.ruleChoicesByPlayerId = {};
       this.ruleChosenByPlayerId = {};
-      for (const p of this.players) this.ruleChoicesByPlayerId[p.id] = this.ruleManager.randomChoices(3);
+      for (const p of this.players) {
+        const isDebugPicker = this.debugMode && p?.name === "DEBUG";
+        this.ruleChoicesByPlayerId[p.id] = isDebugPicker ? this.ruleManager.allChoices() : this.ruleManager.randomChoices(3);
+      }
       this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;
       this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rule choice time!" });
     }

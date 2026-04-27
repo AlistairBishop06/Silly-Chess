@@ -613,6 +613,12 @@ body:has(#gamePanel:not([hidden])) #gamePanel .cards {
   overflow: hidden;
 }
 
+/* Allow scrolling when debug mode shows lots of choices. */
+body:has(#gamePanel:not([hidden])) #gamePanel #choiceArea .cards {
+  overflow: auto;
+  padding-right: 6px;
+}
+
 body:has(#gamePanel:not([hidden])) #gamePanel .card {
   min-height: 0;
   padding: 10px 10px 8px 10px;

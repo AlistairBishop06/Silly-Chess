@@ -78,6 +78,18 @@ class RuleManager {
     return out;
   }
 
+  allChoices() {
+    const rules = allRules();
+    return rules.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      kind: kindClass(r),
+      typeLabel: ruleTypeLabel(r),
+      remaining: r.kind === "duration" ? r.durationTurns : r.kind === "delayed" ? r.delayTurns : null,
+    }));
+  }
+
   addRule(ruleId) {
     const r = getRuleById(ruleId);
     if (!r) return { ok: false, error: "Unknown rule" };

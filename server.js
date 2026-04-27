@@ -6,6 +6,9 @@ const { Server } = require("socket.io");
 const { createLobbyCode, createRoom, getRoom, joinRoom, leaveRoom } = require("./src/server/lobby");
 const { Game } = require("./src/server/game/Game");
 
+// DEBUG MODE: set `true` to enable debug-only UI/behaviour (e.g. player named "DEBUG" sees all rules at rule choice).
+const DEBUG_MODE = true;
+
 const app = express();
 app.use(
   express.static(path.join(__dirname, "public"), {
@@ -132,7 +135,7 @@ io.on("connection", (socket) => {
   socket.on("lobby:create", ({ name } = {}, cb) => {
     const code = createLobbyCode((c) => rooms.has(c));
     const room = createRoom(code);
-    room.game = new Game({ roomCode: code });
+    room.game = new Game({ roomCode: code, debugMode: DEBUG_MODE });
     rooms.set(code, { room, socketsByPlayerId: new Map() });
 
     const player = room.addPlayer(socket.id, name || "Player 1");
