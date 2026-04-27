@@ -82,9 +82,15 @@
               </div>
             </div>
 
-            <div class="boardWrap">
-              <canvas id="board" width="720" height="720"></canvas>
-              <div id="overlayText" class="overlayText"></div>
+            <div class="boardArea">
+              <div class="boardSideNames">
+                <div id="sideLabelTop" class="boardName"></div>
+                <div id="sideLabelBottom" class="boardName"></div>
+              </div>
+              <div class="boardWrap">
+                <canvas id="board" width="720" height="720"></canvas>
+                <div id="overlayText" class="overlayText"></div>
+              </div>
             </div>
 
             <div class="cardsArea" id="choiceArea" hidden>
@@ -177,11 +183,15 @@
         <section class="right">
           <div class="panel helpPanel">
             <h2>Table rules</h2>
+            <div class="row gap" style="margin-top: 10px;">
+              <button id="rulebookBtn" type="button">View all rule cards</button>
+            </div>
             <div class="help">
               Play normal chess until the rule draft opens every 7 rounds. Each player must then choose a card that mutates the match. What rules will you add to claim victory?
               <br>
               You could...
             </div>
+
             <div class="ruleTeasers" aria-hidden="true">
               <div>Make giant rooks</div>
               <div>Add a fan to the board</div>
@@ -198,6 +208,19 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="rulebookModal" class="modal" hidden>
+      <div class="modalCard rulebookCard">
+        <div class="cardsHeader">
+          <h3>Rulebook</h3>
+          <div class="rulebookActions">
+            <button id="rulebookCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="modalDetail">Browse every rule card before starting a match.</div>
+        <div id="rulebookCards" class="cards rulebookGrid"></div>
+      </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>

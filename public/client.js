@@ -8,6 +8,10 @@ const els = {
   createBtn: document.getElementById("createBtn"),
   code: document.getElementById("codeInput"),
   joinBtn: document.getElementById("joinBtn"),
+  rulebookBtn: document.getElementById("rulebookBtn"),
+  rulebookModal: document.getElementById("rulebookModal"),
+  rulebookCloseBtn: document.getElementById("rulebookCloseBtn"),
+  rulebookCards: document.getElementById("rulebookCards"),
   lobbyPanel: document.getElementById("lobbyPanel"),
   gamePanel: document.getElementById("gamePanel"),
   leaveBtn: document.getElementById("leaveBtn"),
@@ -23,6 +27,8 @@ const els = {
   plyInfo: document.getElementById("plyInfo"),
   canvas: document.getElementById("board"),
   overlayText: document.getElementById("overlayText"),
+  sideLabelTop: document.getElementById("sideLabelTop"),
+  sideLabelBottom: document.getElementById("sideLabelBottom"),
   activeCards: document.getElementById("activeCards"),
   choiceArea: document.getElementById("choiceArea"),
   choiceCards: document.getElementById("choiceCards"),
@@ -66,6 +72,7 @@ const state = {
   lastSyncAt: 0,
   lastRematchId: null,
   pendingTargetKey: null,
+  cachedRulebook: null,
 };
 
 const confetti = {
@@ -962,6 +969,34 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+async function openRulebook() {
+  if (!els.rulebookModal || !els.rulebookCards) return;
+  els.rulebookModal.hidden = false;
+
+  if (!state.cachedRulebook) {
+    els.rulebookCards.innerHTML = `<div class="modalStatus">Loading…</div>`;
+    try {
+      const res = await fetch("/api/rules", { cache: "no-store" });
+      const json = await res.json();
+      if (!json?.ok || !Array.isArray(json.rules)) throw new Error("bad response");
+      state.cachedRulebook = json.rules;
+    } catch {
+      els.rulebookCards.innerHTML = `<div class="modalStatus">Failed to load rules.</div>`;
+      return;
+    }
+  }
+
+  els.rulebookCards.innerHTML = "";
+  for (const r of state.cachedRulebook) {
+    els.rulebookCards.appendChild(buildRuleCard(r, { pickable: false }));
+  }
+}
+
+function closeRulebook() {
+  if (!els.rulebookModal) return;
+  els.rulebookModal.hidden = true;
+}
+
 function syncUI() {
   const s = state.serverState;
   const connected = !!state.lobby;
@@ -983,6 +1018,8 @@ function syncUI() {
     els.choiceCards.classList.remove("debugChoice");
     if (els.resultModal) els.resultModal.hidden = true;
     stopConfetti();
+    if (els.sideLabelTop) els.sideLabelTop.textContent = "";
+    if (els.sideLabelBottom) els.sideLabelBottom.textContent = "";
     return;
   }
 
@@ -1002,6 +1039,13 @@ function syncUI() {
   }
 
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
+
+  const whiteName = (players.find((p) => p.color === "w")?.name || "White").trim();
+  const blackName = (players.find((p) => p.color === "b")?.name || "Black").trim();
+  const topIsWhite = !!state.flipVisual;
+  if (els.sideLabelTop) els.sideLabelTop.textContent = topIsWhite ? whiteName : blackName;
+  if (els.sideLabelBottom) els.sideLabelBottom.textContent = topIsWhite ? blackName : whiteName;
+
   renderCards();
   renderChoice();
   renderRps();
@@ -1112,6 +1156,16 @@ socket.on("game:state", (s) => {
   state.lastStateAt = Date.now();
   handleEffects();
   syncUI();
+});
+
+els.rulebookBtn?.addEventListener("click", () => {
+  openRulebook();
+});
+els.rulebookCloseBtn?.addEventListener("click", () => {
+  closeRulebook();
+});
+els.rulebookModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.rulebookModal) closeRulebook();
 });
 
 els.createBtn.addEventListener("click", () => {

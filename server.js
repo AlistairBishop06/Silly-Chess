@@ -5,11 +5,40 @@ const { Server } = require("socket.io");
 
 const { createLobbyCode, createRoom, getRoom, joinRoom, leaveRoom } = require("./src/server/lobby");
 const { Game } = require("./src/server/game/Game");
+const { allRules } = require("./src/server/game/rules/ruleset");
 
 // DEBUG MODE: set `true` to enable debug-only UI/behaviour (e.g. player named "DEBUG" sees all rules at rule choice).
 const DEBUG_MODE = true;
 
 const app = express();
+
+function ruleTypeLabel(rule) {
+  if (rule.kind === "instant") return "Instant";
+  if (rule.kind === "delayed") return `In ${rule.delayTurns} Turns`;
+  if (rule.kind === "duration") return `For ${rule.durationTurns} Turns`;
+  return "Rule";
+}
+
+function kindClass(rule) {
+  if (rule.kind === "instant") return "instant";
+  if (rule.kind === "delayed") return "delayed";
+  if (rule.kind === "duration") return "duration";
+  return "duration";
+}
+
+app.get("/api/rules", (_req, res) => {
+  const rules = allRules();
+  const cards = rules.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    kind: kindClass(r),
+    typeLabel: ruleTypeLabel(r),
+    remaining: r.kind === "duration" ? r.durationTurns : r.kind === "delayed" ? r.delayTurns : null,
+  }));
+  res.json({ ok: true, rules: cards });
+});
+
 app.use(
   express.static(path.join(__dirname, "public"), {
     etag: false,

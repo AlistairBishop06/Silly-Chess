@@ -115,7 +115,7 @@ const RULES = [
     id: "inst_coinflip_wager",
     kind: "instant",
     name: "Coinflip Wager",
-    description: "Both players wager pieces on a coin flip. Loserâ€™s wagered pieces switch sides.",
+    description: "Both players wager pieces on a coin flip. Loser's wagered pieces switch sides.",
     apply(game) {
       game.startCoinflipWager?.();
     },
