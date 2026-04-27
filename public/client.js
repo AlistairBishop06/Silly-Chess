@@ -200,6 +200,15 @@ function saveSession() {
   }
 }
 
+function updateBodyState() {
+  document.body.classList.toggle("is-connected", state.connected);
+  document.body.classList.toggle("is-in-game", !!state.lobby);
+  if (!state.lobby) {
+    document.body.classList.remove("is-choosing");
+    document.body.classList.remove("is-debug-choice");
+  }
+}
+
 loadSession();
 
 function logLine(html) {
@@ -404,7 +413,7 @@ function draw() {
         ? s.result
         : yourTurn
           ? "Your move"
-          : "Waiting…";
+          : "Waiting...";
   setOverlay(msg);
 }
 
@@ -413,12 +422,12 @@ function drawPiece(sq, p) {
   const size = els.canvas.width / 8;
   const colourBlind = !!(state.serverState && state.serverState.colourBlind);
   const map = {
-    p: { w: "♙", b: "♟" },
-    n: { w: "♘", b: "♞" },
-    b: { w: "♗", b: "♝" },
-    r: { w: "♖", b: "♜" },
-    q: { w: "♕", b: "♛" },
-    k: { w: "♔", b: "♚" },
+    p: { w: "\u2659", b: "\u265F" },
+    n: { w: "\u2658", b: "\u265E" },
+    b: { w: "\u2657", b: "\u265D" },
+    r: { w: "\u2656", b: "\u265C" },
+    q: { w: "\u2655", b: "\u265B" },
+    k: { w: "\u2654", b: "\u265A" },
   };
 
   // Subtle glow for last move.
@@ -472,10 +481,10 @@ function renderCards() {
 }
 
 function ruleTypeIcon(kind) {
-  if (kind === "instant") return "⚡";
-  if (kind === "delayed") return "⏳";
-  if (kind === "permanent") return "∞";
-  return "⏱";
+  if (kind === "instant") return "\u26A1";
+  if (kind === "delayed") return "\u23F3";
+  if (kind === "permanent") return "\u221E";
+  return "\u23F1";
 }
 
 function ruleArtIcon(ruleId, ruleName) {
@@ -484,29 +493,29 @@ function ruleArtIcon(ruleId, ruleName) {
 
   const hay = `${id} ${name}`;
 
-  if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "💥";
-  if (hay.includes("lava")) return "🌋";
-  if (hay.includes("deadly") || hay.includes("death")) return "☠";
-  if (hay.includes("shield")) return "🛡";
-  if (hay.includes("swap") || hay.includes("mirror")) return "⇄";
-  if (hay.includes("teleport")) return "🌀";
-  if (hay.includes("shuffle") || hay.includes("random") || hay.includes("rps") || hay.includes("dice")) return "🎲";
-  if (hay.includes("flip") || hay.includes("rotate") || hay.includes("turn")) return "🔄";
-  if (hay.includes("spawn") || hay.includes("block") || hay.includes("wall")) return "🧱";
-  if (hay.includes("extra move") || hay.includes("double")) return "⏩";
+  if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "\u{1F4A5}";
+  if (hay.includes("lava")) return "\u{1F30B}";
+  if (hay.includes("deadly") || hay.includes("death")) return "\u2620";
+  if (hay.includes("shield")) return "\u{1F6E1}";
+  if (hay.includes("swap") || hay.includes("mirror")) return "\u21C4";
+  if (hay.includes("teleport")) return "\u{1F300}";
+  if (hay.includes("shuffle") || hay.includes("random") || hay.includes("rps") || hay.includes("dice")) return "\u{1F3B2}";
+  if (hay.includes("flip") || hay.includes("rotate") || hay.includes("turn")) return "\u{1F504}";
+  if (hay.includes("spawn") || hay.includes("block") || hay.includes("wall")) return "\u{1F9F1}";
+  if (hay.includes("extra move") || hay.includes("double")) return "\u23E9";
 
-  if (hay.includes("queen")) return "♛";
-  if (hay.includes("king")) return "♚";
-  if (hay.includes("rook")) return "♜";
-  if (hay.includes("bishop")) return "♝";
-  if (hay.includes("knight")) return "♞";
-  if (hay.includes("pawn")) return "♟";
+  if (hay.includes("queen")) return "\u265B";
+  if (hay.includes("king")) return "\u265A";
+  if (hay.includes("rook")) return "\u265C";
+  if (hay.includes("bishop")) return "\u265D";
+  if (hay.includes("knight")) return "\u265E";
+  if (hay.includes("pawn")) return "\u265F";
 
-  if (hay.includes("center")) return "⦿";
-  if (hay.includes("column") || hay.includes("file")) return "▮";
-  if (hay.includes("edge") || hay.includes("perimeter")) return "⬚";
+  if (hay.includes("center")) return "\u29BF";
+  if (hay.includes("column") || hay.includes("file")) return "\u25AE";
+  if (hay.includes("edge") || hay.includes("perimeter")) return "\u2B1A";
 
-  return "✦";
+  return "\u2726";
 }
 
 function buildRuleCard(r, { pickable }) {
@@ -627,7 +636,7 @@ function renderRps() {
   const oppPicked = opp ? !!picked[opp] : false;
 
   if (els.rpsStatus) {
-    els.rpsStatus.textContent = `Round ${s.rps.round || 1} · You: ${youPicked ? "picked" : "waiting"} · Opponent: ${oppPicked ? "picked" : "waiting"}`;
+    els.rpsStatus.textContent = `Round ${s.rps.round || 1} | You: ${youPicked ? "picked" : "waiting"} | Opponent: ${oppPicked ? "picked" : "waiting"}`;
   }
 
   const disable = !state.lobby || !state.playerId || youPicked;
@@ -642,9 +651,14 @@ function renderChoice() {
   const needsChoice = s.phase === "ruleChoice" && !!choice && !s.ruleChosenByPlayerId?.[state.playerId];
 
   els.choiceArea.hidden = !needsChoice;
+  document.body.classList.toggle("is-choosing", needsChoice);
+  document.body.classList.toggle("is-debug-choice", needsChoice && choice.length > 3);
+  els.choiceCards.classList.toggle("debugChoice", needsChoice && choice.length > 3);
   if (!needsChoice) {
     els.choiceCards.innerHTML = "";
     state.lastChoiceKey = null;
+    document.body.classList.remove("is-debug-choice");
+    els.choiceCards.classList.remove("debugChoice");
     return;
   }
 
@@ -675,6 +689,7 @@ function escapeHtml(s) {
 function syncUI() {
   const s = state.serverState;
   const connected = !!state.lobby;
+  updateBodyState();
   els.lobbyPanel.hidden = connected;
   els.gamePanel.hidden = !connected;
   if (!connected) return;
@@ -682,11 +697,14 @@ function syncUI() {
   if (!s) {
     els.lobbyCode.textContent = state.lobby;
     els.youInfo.textContent = `${state.color === "w" ? "White" : "Black"} (${state.playerId})`;
-    els.turnInfo.textContent = "—";
+    els.turnInfo.textContent = "-";
     els.plyInfo.textContent = "0";
-    els.gameMsg.textContent = "Syncing…";
+    els.gameMsg.textContent = "Syncing...";
     els.activeCards.innerHTML = "";
     els.choiceArea.hidden = true;
+    document.body.classList.remove("is-choosing");
+    document.body.classList.remove("is-debug-choice");
+    els.choiceCards.classList.remove("debugChoice");
     if (els.resultModal) els.resultModal.hidden = true;
     stopConfetti();
     return;
@@ -698,8 +716,8 @@ function syncUI() {
   els.plyInfo.textContent = String(s.ply || 0);
   const players = s.players || [];
   const opp = players.find((p) => p.id !== state.playerId);
-  const oppText = opp ? `${opp.name} (${opp.color === "w" ? "White" : "Black"})` : "Waiting for opponent…";
-  els.gameMsg.textContent = s.check ? `${s.check} in check · ${oppText}` : oppText;
+  const oppText = opp ? `${opp.name} (${opp.color === "w" ? "White" : "Black"})` : "Waiting for opponent...";
+  els.gameMsg.textContent = s.check ? `${s.check} in check | ${oppText}` : oppText;
 
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
   renderCards();
@@ -757,6 +775,7 @@ function handleEffects() {
 
 function setConnectedUI() {
   els.status.textContent = state.connected ? "Connected" : "Disconnected";
+  updateBodyState();
 }
 
 socket.on("connect", () => {
