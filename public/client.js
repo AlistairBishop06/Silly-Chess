@@ -54,6 +54,7 @@ const state = {
   lastStateAt: 0,
   lastSyncAt: 0,
   lastRematchId: null,
+  pendingTargetKey: null,
 };
 
 const confetti = {
@@ -356,10 +357,33 @@ function draw() {
     }
   }
 
+  // Fans.
+  for (const fan of s.fans || []) {
+    const rank = fan.rank;
+    if (rank == null) continue;
+    const y = squareToCanvasCenter(toIdxSafe(0, rank)).y;
+    const fromX = fan.side === "right" ? els.canvas.width - size * 0.32 : size * 0.32;
+    const toX = fan.side === "right" ? size * 0.32 : els.canvas.width - size * 0.32;
+    ctx.strokeStyle = "rgba(36,214,200,0.52)";
+    ctx.lineWidth = 5;
+    ctx.setLineDash([16, 12]);
+    ctx.beginPath();
+    ctx.moveTo(fromX, y);
+    ctx.lineTo(toX, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   // Pieces.
+  const titans = [];
   for (let sq = 0; sq < 64; sq++) {
     const p = s.board[sq];
     if (!p) continue;
+    if (p.tags?.includes("titanBody")) continue;
+    if (p.tags?.includes("titan")) {
+      titans.push({ sq, p });
+      continue;
+    }
     if (fogVisible && p.color !== state.color && p.color !== "x" && !fogVisible.has(sq)) continue;
     if (s.invisiblePieces && !(s.visibleSquares || []).includes(sq) && p.type !== "k") continue;
     if (p.color === "x") {
@@ -368,6 +392,7 @@ function draw() {
     }
     drawPiece(sq, p);
   }
+  for (const { sq, p } of titans) drawTitanPiece(sq, p);
 
   // Particles.
   const t = nowMs();
@@ -407,6 +432,10 @@ function draw() {
   const msg =
     s.phase === "ruleChoice"
       ? "Rule choice!"
+      : s.phase === "targetRule"
+        ? s.pendingTargetRule?.playerId === state.playerId
+          ? (s.pendingTargetRule.prompt || "Choose a target")
+          : "Opponent choosing a rule target"
       : s.phase === "rps"
         ? "RPS Duel!"
       : s.result
@@ -460,6 +489,53 @@ function drawPiece(sq, p) {
     ctx.arc(x + size * 0.28, y - size * 0.28, size * 0.06, 0, Math.PI * 2);
     ctx.fill();
   }
+  if (p.tags?.includes("suicideBomber")) {
+    ctx.font = `${Math.floor(size * 0.22)}px "Segoe UI Symbol", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#ff4f8b";
+    ctx.strokeStyle = "rgba(0,0,0,0.38)";
+    ctx.lineWidth = 2;
+    ctx.strokeText("\u{1F4A3}", x + size * 0.25, y - size * 0.25);
+    ctx.fillText("\u{1F4A3}", x + size * 0.25, y - size * 0.25);
+  }
+}
+
+function drawTitanPiece(sq, p) {
+  const size = els.canvas.width / 8;
+  const file = sq % 8;
+  const rank = Math.floor(sq / 8);
+  const anchor = squareToCanvasCenter(sq);
+  const right = file < 7 ? squareToCanvasCenter(sq + 1) : anchor;
+  const up = rank < 7 ? squareToCanvasCenter(sq + 8) : anchor;
+  const centerX = (anchor.x + right.x) / 2;
+  const centerY = (anchor.y + up.y) / 2;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 209, 102, 0.22)";
+  ctx.strokeStyle = "rgba(255, 209, 102, 0.72)";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.roundRect(centerX - size, centerY - size, size * 2, size * 2, size * 0.12);
+  ctx.fill();
+  ctx.stroke();
+
+  const map = {
+    p: { w: "\u2659", b: "\u265F" },
+    n: { w: "\u2658", b: "\u265E" },
+    b: { w: "\u2657", b: "\u265D" },
+    r: { w: "\u2656", b: "\u265C" },
+    q: { w: "\u2655", b: "\u265B" },
+    k: { w: "\u2654", b: "\u265A" },
+  };
+  ctx.font = `${Math.floor(size * 1.05)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = p.color === "w" ? "#fffdf7" : "#101422";
+  ctx.strokeStyle = p.color === "w" ? "rgba(10,12,18,0.42)" : "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 7;
+  const glyph = map[p.type]?.[p.color] || "?";
+  ctx.strokeText(glyph, centerX, centerY + 4);
+  ctx.fillText(glyph, centerX, centerY);
+  ctx.restore();
 }
 
 function drawBlock(sq) {
@@ -493,7 +569,11 @@ function ruleArtIcon(ruleId, ruleName) {
 
   const hay = `${id} ${name}`;
 
+  if (hay.includes("suicide bomber")) return "\u{1F4A3}";
   if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "\u{1F4A5}";
+  if (hay.includes("titan")) return "\u{1F4AA}";
+  if (hay.includes("reset")) return "\u21BA";
+  if (hay.includes("fan")) return "\u{1F32C}";
   if (hay.includes("lava")) return "\u{1F30B}";
   if (hay.includes("deadly") || hay.includes("death")) return "\u2620";
   if (hay.includes("shield")) return "\u{1F6E1}";
@@ -604,6 +684,10 @@ function updateChoiceTimer() {
   if (!s || els.choiceArea.hidden) return;
   const remainingMs = Math.max(0, (s.ruleChoiceDeadlineMs || 0) - Date.now());
   els.choiceTimer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
+}
+
+function toIdxSafe(file, rank) {
+  return rank * 8 + file;
 }
 
 function updateRpsTimer() {
@@ -718,6 +802,12 @@ function syncUI() {
   const opp = players.find((p) => p.id !== state.playerId);
   const oppText = opp ? `${opp.name} (${opp.color === "w" ? "White" : "Black"})` : "Waiting for opponent...";
   els.gameMsg.textContent = s.check ? `${s.check} in check | ${oppText}` : oppText;
+  if (s.pendingTargetRule) {
+    els.gameMsg.textContent =
+      s.pendingTargetRule.playerId === state.playerId
+        ? s.pendingTargetRule.prompt || "Choose a rule target"
+        : "Opponent choosing a rule target";
+  }
 
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
   renderCards();
@@ -881,6 +971,16 @@ els.rpsScissorsBtn?.addEventListener("click", () => sendRpsChoice("scissors"));
 els.canvas.addEventListener("mousedown", (ev) => {
   if (!state.serverState || !state.lobby) return;
   const s = state.serverState;
+  if (s.phase === "targetRule") {
+    const pending = s.pendingTargetRule;
+    if (!pending || pending.playerId !== state.playerId) return;
+    const square = canvasToSquare(ev.clientX, ev.clientY);
+    socket.emit("game:ruleTarget", { code: state.lobby, playerId: state.playerId, square }, (res) => {
+      if (!res?.ok) logLine(`<strong>Target</strong>: ${escapeHtml(res?.error || "target rejected")}`);
+      socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+    });
+    return;
+  }
   if (s.phase !== "play") return;
   if (s.turn !== state.color) return;
   if (s.result) return;

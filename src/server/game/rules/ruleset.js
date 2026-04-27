@@ -391,6 +391,54 @@ const RULES = [
   // ── NEW INSTANT RULES ──────────────────────────────────────────────────────
 
   {
+    id: "inst_titan",
+    kind: "instant",
+    name: "Titan",
+    description: "Choose one of your pieces. It becomes a 2x2 titan, deleting anything in its way and gaining extended movement.",
+    apply(game, ctx) {
+      game.enqueueTargetRule?.({
+        ruleId: "inst_titan",
+        playerId: ctx?.playerId,
+        color: ctx?.color,
+        prompt: "Choose one of your pieces to become a titan.",
+      });
+    },
+  },
+  {
+    id: "inst_hard_reset",
+    kind: "instant",
+    name: "Hard Reset",
+    description: "Reset the game to the starting position and remove every active, delayed, duration, and permanent rule.",
+    apply(game) {
+      game.resetBoardState?.({ keepRules: false });
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Hard Reset! The match returned to the start and every rule was cleared." });
+    },
+  },
+  {
+    id: "inst_soft_reset",
+    kind: "instant",
+    name: "Soft Reset",
+    description: "Reset all pieces to the starting position, but keep current and permanent rules in play.",
+    apply(game) {
+      game.resetBoardState?.({ keepRules: true });
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Soft Reset! Pieces returned to start while active rules stayed in play." });
+    },
+  },
+  {
+    id: "inst_suicide_bomber",
+    kind: "instant",
+    name: "Suicide Bomber",
+    description: "Choose one of your pieces. The next time it moves, it destroys itself and every adjacent piece where it lands.",
+    apply(game, ctx) {
+      game.enqueueTargetRule?.({
+        ruleId: "inst_suicide_bomber",
+        playerId: ctx?.playerId,
+        color: ctx?.color,
+        prompt: "Choose one of your pieces to arm as a suicide bomber.",
+      });
+    },
+  },
+  {
     id: "inst_peasant_revolt",
     kind: "instant",
     name: "Peasant Revolt",
@@ -588,22 +636,45 @@ const RULES = [
     kind: "delayed",
     delayTurns: 5,
     name: "Build a Wall",
-    description: "In 5 turns, a diagonal death wall will be built.",
+    description: "In 5 turns, a diagonal death wall will be built in either direction.",
     becomesPermanent: true,
     apply(game) {
-      c = randInt(1,2)
-      if (c == 1){
+      if (Math.random() < 0.5) {
         for (let i = 0; i < 8; i++) {
           game.hazards.deadly.add(toIdx(i, i));
         }
-      }
-      else{
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: "Build a Wall: death wall formed from a1 to h8." });
+      } else {
         for (let i = 0; i < 8; i++) {
           game.hazards.deadly.add(toIdx(i, 7-i));
         }
-
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: "Build a Wall: death wall formed from a8 to h1." });
       }
       destroySquares(game, [...game.hazards.deadly], "shrink");
+    },
+  },
+  {
+    id: "del_fan_5",
+    kind: "delayed",
+    delayTurns: 5,
+    name: "Fan",
+    description: "In 5 turns, a fan appears on a random row from the left or right. Pieces entering that row are blown until blocked.",
+    becomesPermanent: true,
+    onSchedule(game, inst) {
+      inst.data.rank = randInt(8);
+      inst.data.side = Math.random() < 0.5 ? "left" : "right";
+      game.effects.push({
+        type: "log",
+        id: game.nextEffectId(),
+        text: `Fan incoming on row ${inst.data.rank + 1} from the ${inst.data.side}.`,
+      });
+    },
+    apply(game, ctx) {
+      const rank = ctx?.inst?.data?.rank;
+      const side = ctx?.inst?.data?.side;
+      if (typeof rank !== "number" || (side !== "left" && side !== "right")) return;
+      game.fans.push({ rank, side, dir: side === "left" ? 1 : -1 });
+      game.effects.push({ type: "rule", id: game.nextEffectId(), text: `Fan active on row ${rank + 1}, blowing ${side === "left" ? "right" : "left"}.` });
     },
   },
   {

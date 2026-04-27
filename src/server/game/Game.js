@@ -18,6 +18,17 @@ function serializeBoard(board) {
   return board.map((p) => (p ? { type: p.type, color: p.color, tags: p.tags } : null));
 }
 
+function defaultPermanentFlags() {
+  return {
+    wrapEdges: false,
+    gravity: false,
+    bishopsRookLike: false,
+    forcedKingMove: false,
+    allPiecesKingLike: false,
+    chainExplosions: false,
+  };
+}
+
 function deepCloneState(game) {
   return {
     state: {
@@ -27,11 +38,12 @@ function deepCloneState(game) {
     },
     ply: game.ply,
     permanent: { ...game.permanent },
-    hazards: { deadly: [...game.hazards.deadly], lava: [...game.hazards.lava] },
+    hazards: { deadly: [...game.hazards.deadly], lava: [...game.hazards.lava], asteroid: [...game.hazards.asteroid] },
     missingSquares: [...game.missingSquares],
     extraMoves: { ...game.extraMoves },
     shield: { ...game.shield },
     marks: { lightning: [...(game.marks?.lightning || [])] },
+    fans: game.fans.map((fan) => ({ ...fan })),
   };
 }
 
@@ -80,24 +92,19 @@ class Game {
     this.asteroidPlies = 0;
     this.extraMoves = { w: 0, b: 0 };
     this.shield = { w: 0, b: 0 };
-    this.permanent = {
-      wrapEdges: false,
-      gravity: false,
-      bishopsRookLike: false,
-      forcedKingMove: false,
-      allPiecesKingLike: false,
-      chainExplosions: false,
-    };
+    this.permanent = defaultPermanentFlags();
 
     this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
     this.missingSquares = new Set();
     this.marks = { lightning: new Set() };
+    this.fans = [];
 
     this.lastMoveSquares = [];
 
     this.trailBlocks = [];
     this.requestTimeReverse = 0;
     this.history = [];
+    this.pendingTargetRules = [];
 
     // Mini-games.
     this.rps = null; // { round, byColor:{w,b}, pickedByColor:{w,b}, deadlineMs }
@@ -121,6 +128,155 @@ class Game {
 
   clearTransientEffects() {
     this.effects = [];
+  }
+
+  resetBoardState({ keepRules }) {
+    this.removeTitanBodies();
+    this.state = initialState();
+    this.ply = 0;
+    this.result = null;
+    this.resultInfo = null;
+    this.readyByPlayerId = {};
+    this.lastMoveSquares = [];
+    this.history = [];
+    this.rps = null;
+    this.ruleChoicesByPlayerId = {};
+    this.ruleChosenByPlayerId = {};
+    this.ruleChoiceDeadlineMs = null;
+
+    this.visualFlipPlies = 0;
+    this.colourBlindPlies = 0;
+    this.asteroidPlies = 0;
+    this.extraMoves = { w: 0, b: 0 };
+    this.shield = { w: 0, b: 0 };
+    this.trailBlocks = [];
+    this.requestTimeReverse = 0;
+    this.pendingTargetRules = [];
+
+    if (!keepRules) {
+      this.ruleManager = new RuleManager(this);
+      this.permanent = defaultPermanentFlags();
+      this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
+      this.missingSquares = new Set();
+      this.marks = { lightning: new Set() };
+      this.fans = [];
+    }
+  }
+
+  enqueueTargetRule(targetRule) {
+    if (!targetRule?.playerId || !targetRule?.color) return;
+    this.pendingTargetRules.push(targetRule);
+  }
+
+  currentPendingTarget() {
+    return this.pendingTargetRules[0] || null;
+  }
+
+  submitRuleTarget(playerId, square) {
+    if (this.phase !== "targetRule") return { ok: false, error: "No targeted rule is waiting" };
+    const pending = this.currentPendingTarget();
+    if (!pending) return { ok: false, error: "No targeted rule is waiting" };
+    if (pending.playerId !== playerId) return { ok: false, error: "Waiting for the other player to choose a target" };
+    if (square == null || square < 0 || square > 63) return { ok: false, error: "Bad target" };
+
+    const piece = this.state.board[square];
+    if (!piece || piece.color !== pending.color || piece.color === "x") return { ok: false, error: "Choose one of your own pieces" };
+
+    let res = { ok: false, error: "Unknown targeted rule" };
+    if (pending.ruleId === "inst_titan") res = this.makeTitan(square, pending.color);
+    if (pending.ruleId === "inst_suicide_bomber") res = this.armSuicideBomber(square, pending.color);
+    if (!res.ok) return res;
+
+    this.pendingTargetRules.shift();
+    this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+    this.evaluateGameEnd();
+    return { ok: true };
+  }
+
+  titanAnchorForSquare(sq) {
+    return toIdx(Math.min(idxToFile(sq), 6), Math.min(idxToRank(sq), 6));
+  }
+
+  titanFootprint(anchor) {
+    const f = idxToFile(anchor);
+    const r = idxToRank(anchor);
+    if (f < 0 || f > 6 || r < 0 || r > 6) return [];
+    return [anchor, toIdx(f + 1, r), toIdx(f, r + 1), toIdx(f + 1, r + 1)];
+  }
+
+  isTitan(piece) {
+    return !!piece?.tags?.includes("titan");
+  }
+
+  isTitanBody(piece) {
+    return !!piece?.tags?.includes("titanBody");
+  }
+
+  removeTitanBodies() {
+    for (let i = 0; i < 64; i++) {
+      if (this.isTitanBody(this.state.board[i])) this.state.board[i] = null;
+    }
+  }
+
+  syncTitanBodies({ destructive = false } = {}) {
+    const titans = [];
+    for (let i = 0; i < 64; i++) {
+      const p = this.state.board[i];
+      if (this.isTitan(p)) titans.push({ sq: i, p });
+      if (this.isTitanBody(p)) this.state.board[i] = null;
+    }
+
+    for (const { sq, p } of titans) {
+      const anchor = this.titanAnchorForSquare(sq);
+      if (anchor !== sq) {
+        if (!this.state.board[anchor] || this.state.board[anchor] === p || destructive) {
+          this.state.board[sq] = null;
+          this.state.board[anchor] = p;
+        }
+      }
+      const finalAnchor = this.state.board[anchor] === p ? anchor : sq;
+      for (const bodySq of this.titanFootprint(finalAnchor).slice(1)) {
+        if (destructive && this.state.board[bodySq] && this.state.board[bodySq].type !== "k") {
+          this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [bodySq], reason: "titan" });
+        }
+        if (!this.state.board[bodySq] || destructive) {
+          this.state.board[bodySq] = { type: "x", color: "x", moved: true, tags: ["titanBody"] };
+        }
+      }
+    }
+  }
+
+  makeTitan(square, color) {
+    this.removeTitanBodies();
+    const piece = this.state.board[square];
+    if (!piece || piece.color !== color || piece.color === "x") return { ok: false, error: "Choose one of your own pieces" };
+
+    const anchor = this.titanAnchorForSquare(square);
+    const footprint = this.titanFootprint(anchor);
+    if (footprint.length !== 4 || footprint.some((sq) => this.missingSquares.has(sq))) return { ok: false, error: "Titan will not fit there" };
+
+    piece.tags = [...new Set([...(piece.tags || []).filter((t) => t !== "titanBody"), "titan"])];
+    piece._titanOriginalType = piece._titanOriginalType || piece.type;
+    const destroyed = [];
+    if (anchor !== square && this.state.board[anchor]) destroyed.push(anchor);
+    this.state.board[square] = null;
+    this.state.board[anchor] = piece;
+
+    for (const sq of footprint.slice(1)) {
+      if (this.state.board[sq] && this.state.board[sq]?.type !== "x") destroyed.push(sq);
+      this.state.board[sq] = { type: "x", color: "x", moved: true, tags: ["titanBody"] };
+    }
+    if (destroyed.length) this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: destroyed, reason: "titan" });
+    this.effects.push({ type: "rule", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} created a titan.` });
+    return { ok: true };
+  }
+
+  armSuicideBomber(square, color) {
+    const piece = this.state.board[square];
+    if (!piece || piece.color !== color || piece.color === "x") return { ok: false, error: "Choose one of your own pieces" };
+    piece.tags = [...new Set([...(piece.tags || []), "suicideBomber"])];
+    this.effects.push({ type: "rule", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} armed a suicide bomber.` });
+    return { ok: true };
   }
 
   start(players) {
@@ -153,6 +309,7 @@ class Game {
     if (from == null || from < 0 || from > 63) return [];
     const p = this.state.board[from];
     if (!p || p.color !== color) return [];
+    if (this.isTitan(p)) return this.getTitanLegalDestinations(from, color);
 
     const mods = this.currentModifiers();
     if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
@@ -179,15 +336,18 @@ class Game {
     const beforePhase = this.phase;
     const white = this.players.find((p) => p.color === "w");
     const black = this.players.find((p) => p.color === "b");
-    const ids = [];
-    if (white) ids.push(this.ruleChosenByPlayerId[white.id]);
-    if (black) ids.push(this.ruleChosenByPlayerId[black.id]);
-    for (const id of ids) if (id) this.ruleManager.addRule(id);
+    const picks = [];
+    if (white) picks.push({ player: white, ruleId: this.ruleChosenByPlayerId[white.id] });
+    if (black) picks.push({ player: black, ruleId: this.ruleChosenByPlayerId[black.id] });
+    for (const pick of picks) {
+      if (pick.ruleId) this.ruleManager.addRule(pick.ruleId, { playerId: pick.player.id, color: pick.player.color });
+    }
 
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
-    if (this.phase === beforePhase) this.phase = "play";
+    if (this.pendingTargetRules.length) this.phase = "targetRule";
+    else if (this.phase === beforePhase) this.phase = "play";
     this.evaluateGameEnd();
   }
 
@@ -550,6 +710,174 @@ class Game {
     return [...visible];
   }
 
+  titanCanOccupy(board, anchor, color, currentFootprint = new Set()) {
+    const footprint = this.titanFootprint(anchor);
+    if (footprint.length !== 4) return false;
+    for (const sq of footprint) {
+      if (this.missingSquares.has(sq)) return false;
+      const occupant = board[sq];
+      if (!occupant) continue;
+      if (currentFootprint.has(sq)) continue;
+      if (occupant.color === "x") return false;
+      if (occupant.color === color) return false;
+      if (occupant.type === "k") return false;
+    }
+    return true;
+  }
+
+  titanMoveLeavesKingSafe(from, to, color) {
+    const board = this.state.board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined } : null));
+    const piece = board[from];
+    const currentFootprint = new Set(this.titanFootprint(from));
+    for (const sq of currentFootprint) {
+      if (sq !== from && this.isTitanBody(board[sq])) board[sq] = null;
+    }
+    for (const sq of this.titanFootprint(to)) board[sq] = null;
+    board[to] = piece ? { ...piece, moved: true, tags: piece.tags ? [...piece.tags] : undefined } : null;
+    for (const sq of this.titanFootprint(to).slice(1)) board[sq] = { type: "x", color: "x", moved: true, tags: ["titanBody"] };
+    const nextState = { ...this.state, board };
+    return !require("./ChessEngine").isInCheck(nextState, color, this.currentModifiers());
+  }
+
+  getTitanLegalDestinations(from, color) {
+    const piece = this.state.board[from];
+    if (!this.isTitan(piece)) return [];
+    const currentFootprint = new Set(this.titanFootprint(from));
+    const type = piece._titanOriginalType || piece.type;
+    const file = idxToFile(from);
+    const rank = idxToRank(from);
+    const candidates = new Set();
+
+    const add = (f, r) => {
+      if (f < 0 || f > 6 || r < 0 || r > 6) return;
+      const to = toIdx(f, r);
+      if (!this.titanCanOccupy(this.state.board, to, color, currentFootprint)) return;
+      if (!this.titanMoveLeavesKingSafe(from, to, color)) return;
+      candidates.add(to);
+    };
+
+    const addRay = (df, dr) => {
+      for (let step = 1; step <= 7; step++) {
+        const f = file + df * step;
+        const r = rank + dr * step;
+        if (f < 0 || f > 6 || r < 0 || r > 6) break;
+        const to = toIdx(f, r);
+        if (!this.titanCanOccupy(this.state.board, to, color, currentFootprint)) break;
+        add(f, r);
+        const footprint = this.titanFootprint(to);
+        if (footprint.some((sq) => this.state.board[sq] && !currentFootprint.has(sq))) break;
+      }
+    };
+
+    const diagonals = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+    const orth = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+    if (type === "p") {
+      const dir = color === "w" ? 1 : -1;
+      add(file, rank + dir);
+      add(file, rank + dir * 2);
+      add(file + 1, rank + dir);
+      add(file - 1, rank + dir);
+      add(file + 2, rank + dir * 2);
+      add(file - 2, rank + dir * 2);
+    } else if (type === "n") {
+      const jumps = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
+      for (const [df, dr] of jumps) {
+        add(file + df, rank + dr);
+        add(file + df * 2, rank + dr * 2);
+      }
+    } else if (type === "k") {
+      for (const [df, dr] of diagonals.concat(orth)) {
+        add(file + df, rank + dr);
+        add(file + df * 2, rank + dr * 2);
+      }
+    } else {
+      const dirs = [];
+      if (type === "b" || type === "q") dirs.push(...diagonals);
+      if (type === "r" || type === "q") dirs.push(...orth);
+      for (const [df, dr] of dirs) addRay(df, dr);
+    }
+
+    return [...candidates].filter((sq) => sq !== from);
+  }
+
+  applyTitanMove(from, to) {
+    const piece = this.state.board[from];
+    const oldFootprint = this.titanFootprint(from);
+    const newFootprint = this.titanFootprint(to);
+    const destroyed = [];
+
+    for (const sq of oldFootprint) {
+      if (sq !== from && this.isTitanBody(this.state.board[sq])) this.state.board[sq] = null;
+    }
+    this.state.board[from] = null;
+    for (const sq of newFootprint) {
+      const occupant = this.state.board[sq];
+      if (occupant && occupant.color !== piece.color && occupant.color !== "x") destroyed.push(sq);
+      this.state.board[sq] = null;
+    }
+
+    this.state.board[to] = { ...piece, moved: true, tags: piece.tags ? [...piece.tags] : ["titan"] };
+    for (const sq of newFootprint.slice(1)) {
+      this.state.board[sq] = { type: "x", color: "x", moved: true, tags: ["titanBody"] };
+    }
+    if (destroyed.length) this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: destroyed, reason: "titan" });
+    this.state.lastMove = { from, to, promotion: "q" };
+    this.state.turn = other(this.state.turn);
+  }
+
+  applyFansToSquare(sq) {
+    const piece = this.state.board[sq];
+    if (!piece || piece.color === "x" || this.isTitan(piece)) return sq;
+    const fan = this.fans.find((f) => f.rank === idxToRank(sq));
+    if (!fan) return sq;
+
+    let cur = sq;
+    while (true) {
+      const nf = idxToFile(cur) + fan.dir;
+      const rank = idxToRank(cur);
+      if (nf < 0 || nf > 7) break;
+      const next = toIdx(nf, rank);
+      if (this.missingSquares.has(next) || this.state.board[next]) break;
+      this.state.board[next] = this.state.board[cur];
+      this.state.board[cur] = null;
+      cur = next;
+    }
+    if (cur !== sq) {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: `Fan blew a piece from ${this.squareName(sq)} to ${this.squareName(cur)}.` });
+    }
+    return cur;
+  }
+
+  applySuicideBomberIfNeeded(sq) {
+    const piece = this.state.board[sq];
+    if (!piece?.tags?.includes("suicideBomber")) return false;
+    const blast = [sq];
+    const f = idxToFile(sq);
+    const r = idxToRank(sq);
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let df = -1; df <= 1; df++) {
+        if (!df && !dr) continue;
+        const nf = f + df;
+        const nr = r + dr;
+        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
+        blast.push(toIdx(nf, nr));
+      }
+    }
+    const destroyed = [];
+    for (const target of blast) {
+      if (!this.state.board[target]) continue;
+      this.state.board[target] = null;
+      destroyed.push(target);
+    }
+    if (destroyed.length) this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: destroyed, reason: "suicideBomber" });
+    return true;
+  }
+
+  squareName(sq) {
+    return String.fromCharCode(97 + idxToFile(sq)) + String(idxToRank(sq) + 1);
+  }
+
   timeReverseNow(plies) {
     const idx = this.history.length - plies;
     const snap = this.history[idx];
@@ -559,10 +887,12 @@ class Game {
     this.permanent = { ...snap.permanent };
     this.hazards.deadly = new Set(snap.hazards.deadly);
     this.hazards.lava = new Set(snap.hazards.lava);
+    this.hazards.asteroid = new Set(snap.hazards.asteroid || []);
     this.missingSquares = new Set(snap.missingSquares);
     this.extraMoves = { ...snap.extraMoves };
     this.shield = { ...snap.shield };
     this.marks = { lightning: new Set(snap.marks?.lightning || []) };
+    this.fans = (snap.fans || []).map((fan) => ({ ...fan }));
     this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Time reversed ${plies} turns!` });
     return true;
   }
@@ -657,6 +987,57 @@ class Game {
     if (!piece || piece.color !== color) return { ok: false, error: "No piece" };
 
     const mods = this.currentModifiers();
+    if (this.isTitan(piece)) {
+      const legalTitan = this.getTitanLegalDestinations(from, color);
+      if (!legalTitan.includes(to)) return { ok: false, error: "Illegal titan move" };
+
+      this.history.push(deepCloneState(this));
+      if (this.history.length > 20) this.history.shift();
+
+      this.applyTitanMove(from, to);
+      this.ply += 1;
+      let finalTo = to;
+      this.lastMoveSquares = [from, to];
+
+      const wouldCheckNext = require("./ChessEngine").isInCheck(this.state, this.state.turn, { ...mods, shield: { w: 0, b: 0 } });
+      if (wouldCheckNext && this.shield[this.state.turn] > 0) this.shield[this.state.turn] -= 1;
+
+      finalTo = this.applyFansToSquare(finalTo);
+      this.applyHazardsAfterMove(finalTo);
+      this.applySuicideBomberIfNeeded(finalTo);
+
+      if (mods.kingOfHill) this.applyKingOfHill();
+      if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
+      if (mods.randomShift) this.applyRandomShift();
+      if (mods.vanishingTiles) this.refreshVanishingTiles();
+      if (mods.moveTwice) this.extraMoves[color] += 1;
+
+      if (this.extraMoves[color] > 0) {
+        this.extraMoves[color] -= 1;
+        this.state.turn = color;
+        this.effects.push({ type: "log", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} gets an extra move.` });
+      }
+
+      if (this.visualFlipPlies > 0) this.visualFlipPlies -= 1;
+      if (this.colourBlindPlies > 0) this.colourBlindPlies -= 1;
+      if (this.asteroidPlies > 0) {
+        this.asteroidPlies -= 1;
+        if (this.asteroidPlies === 0 && this.hazards.asteroid.size > 0) {
+          this.hazards.asteroid.clear();
+          this.effects.push({ type: "log", id: this.nextEffectId(), text: "Asteroid debris cleared." });
+        }
+      }
+      if (this.requestTimeReverse > 0) {
+        this.requestTimeReverse -= 1;
+        if (this.requestTimeReverse === 0) this.timeReverseNow(2);
+      }
+
+      this.ruleManager.tickAfterPly();
+      this.evaluateGameEnd();
+      this.maybeStartRuleChoice();
+      return { ok: true };
+    }
+
     if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
     const legal = generateLegalMoves(this.state, color, mods);
     const isLegal = legal.some((m) => m.from === from && m.to === to);
@@ -760,8 +1141,14 @@ class Game {
       }
     }
 
+    // Fans blow pieces that enter their row.
+    finalTo = this.applyFansToSquare(finalTo);
+
     // Hazards after move (includes asteroid).
     this.applyHazardsAfterMove(finalTo);
+
+    // Suicide bomber detonates after its final landing square is known.
+    this.applySuicideBomberIfNeeded(finalTo);
 
     // King of the Hill: promote pieces on central squares.
     if (mods.kingOfHill) this.applyKingOfHill();
@@ -845,6 +1232,7 @@ class Game {
     const marks = {
       lightning: [...(this.marks?.lightning || [])],
     };
+    const pendingTarget = this.currentPendingTarget();
 
     return {
       roomCode: this.roomCode,
@@ -873,6 +1261,15 @@ class Game {
       visibleSquares: visibleSquares ? [...visibleSquares] : null,
       fogOfWar: !!mods.fogOfWar,
       fogOfWarSquares,
+      fans: this.fans.map((fan) => ({ rank: fan.rank, side: fan.side, dir: fan.dir })),
+      pendingTargetRule: pendingTarget
+        ? {
+            ruleId: pendingTarget.ruleId,
+            playerId: pendingTarget.playerId,
+            color: pendingTarget.color,
+            prompt: pendingTarget.prompt,
+          }
+        : null,
       rps: this.rps
         ? { active: true, round: this.rps.round, pickedByColor: { ...this.rps.pickedByColor }, deadlineMs: this.rps.deadlineMs }
         : null,

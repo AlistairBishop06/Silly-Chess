@@ -90,14 +90,14 @@ class RuleManager {
     }));
   }
 
-  addRule(ruleId) {
+  addRule(ruleId, ctx = {}) {
     const r = getRuleById(ruleId);
     if (!r) return { ok: false, error: "Unknown rule" };
     const inst = { instanceId: `R${this.instanceSeq++}`, ruleId: r.id, kind: r.kind, remaining: null, triggerIn: null, data: {} };
 
     if (r.kind === "instant") {
       this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: r.name });
-      r.apply?.(this.game, { flags: {} });
+      r.apply?.(this.game, { flags: {}, ...ctx });
       if (r.permanentCard) {
         this.active.push({ instanceId: `P${this.instanceSeq++}`, ruleId: r.id, kind: "permanent", remaining: null, triggerIn: null, data: {} });
       }
