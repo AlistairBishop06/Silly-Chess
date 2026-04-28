@@ -1,31 +1,71 @@
 # Chaos Chess (Multiplayer)
 
-Browser-based multiplayer chess variant with rule cards.
+A browser-based, multiplayer chess variant where the board is the battlefield and rules arrive as cards.
+The server is authoritative (full chess legality and variant logic), and the client is a canvas renderer with board effects and animations.
 
-## Run
+Live demo: https://chaoschess.onrender.com/
+
+## Features
+
+- Multiplayer lobbies (share a short code, play in two tabs or with a friend).
+- Authoritative chess engine: check/checkmate, castling, en passant, promotion (defaults to queen).
+- Rule card draft loop: both players choose from random cards and both chosen rules apply.
+- Rule types: Instant, Delayed ("in X plies"), and Duration ("for X plies").
+- Targeted rules and mini-games (for example RPS Duel and Coinflip Wager).
+- Visual-first board: hazards and rule effects are rendered directly on the board with animation.
+- Teleporter corners render as portals; teleports animate as a zap.
+- Black Hole marks a forming square and later becomes a deadly tile.
+- Fans render a prop plus airflow; pushed pieces glide instead of snapping.
+- Ice Board adds a frosty overlay; sliding is animated.
+- Gravity and wrap-around rules have persistent overlays.
+- Kings show a visible shield aura when shield charges are available.
+
+## How To Play
+
+1. Open the app in two browser windows (or share it with a friend).
+2. Create a lobby in the first window and share the lobby code.
+3. Join from the second window using the code.
+4. Play normal chess moves. When a rule-choice phase appears, pick a card before the timer expires.
+
+Rule timing notes:
+- A "ply" is a half-move (one player's move). Timers tick in plies.
+- By default, a rule choice happens every 7 plies, and the choice timer is 30 seconds. See Configuration below.
+
+## Run Locally
+
+Prereqs: Node.js 18+ recommended.
 
 ```powershell
+npm install
 npm start
 ```
 
-Then open `http://localhost:3000` in two browser windows:
+Then open `http://localhost:3000`.
 
-Or alternatively visit https://chaoschess.onrender.com/.
+Development (same entry point, but keeps intent explicit):
 
-1. Create a lobby in the first window → share the 6-char code
-2. Join from the second window using the code
+```powershell
+npm run dev
+```
 
-## Gameplay
+## Configuration
 
-- Standard chess rules (legal move validation server-side): check/checkmate, castling, en passant, promotion (defaults to Queen).
-- Every **3 combined turns (plies)**, both players get **3 random rule cards** → each picks **1** → both rules apply.
-- Rules can be **Instant**, **In X Turns**, or **For X Turns** (timers tick in plies).
+Environment variables:
+- `PORT` (default: `3000`): HTTP port.
+- `RULE_CHOICE_EVERY_PLIES` (default: `7`): how often players draft rule cards.
+- `RULE_CHOICE_DURATION_MS` (default: `30000`): time window to pick a rule card.
 
-## Project layout
+## Project Structure
 
-- `server.js` — Express + Socket.io server
-- `src/server/game/ChessEngine.js` — chess legality + move generation
-- `src/server/game/Game.js` — authoritative room/game state + sync
-- `src/server/game/rules/` — rule definitions + rule manager
-- `public/` — HTML/CSS/Canvas client
+- `server.js`: Express + Socket.IO server, lobby management, and HTTP routes.
+- `src/server/game/ChessEngine.js`: move generation + legality (including check).
+- `src/server/game/Game.js`: authoritative match state, turn progression, effects, and sync payloads.
+- `src/server/game/rules/RuleManager.js`: rule lifecycle (instant/delayed/duration/permanent).
+- `src/server/game/rules/ruleset.js`: the rules themselves.
+- `public/index.html`: client UI scaffold.
+- `public/client.js`: canvas renderer, interaction, effects/animations, and UI wiring.
+- `public/style.css`: styling.
 
+## License
+
+ISC (see `package.json`).
