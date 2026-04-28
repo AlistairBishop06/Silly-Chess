@@ -134,6 +134,7 @@ class RuleManager {
         continue;
       }
       if (inst.kind === "delayed") {
+        r.onTick?.(this.game, inst);
         inst.triggerIn -= 1;
         if (inst.triggerIn <= 0) {
           this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} triggers!` });

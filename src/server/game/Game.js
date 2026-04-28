@@ -18,6 +18,8 @@ function serializeBoard(board) {
   return board.map((p) => (p ? { type: p.type, color: p.color, tags: p.tags } : null));
 }
 
+const DEMOTE_TYPE = { q: "r", r: "b", b: "n", n: "p", p: "p" };
+
 function defaultPermanentFlags() {
   return {
     wrapEdges: false,
@@ -42,8 +44,16 @@ function deepCloneState(game) {
     missingSquares: [...game.missingSquares],
     extraMoves: { ...game.extraMoves },
     shield: { ...game.shield },
-    marks: { lightning: [...(game.marks?.lightning || [])], blackHole: [...(game.marks?.blackHole || [])] },
+    marks: {
+      lightning: [...(game.marks?.lightning || [])],
+      blackHole: [...(game.marks?.blackHole || [])],
+      plague: [...(game.marks?.plague || [])],
+      swap: [...(game.marks?.swap || [])],
+    },
     fans: game.fans.map((fan) => ({ ...fan })),
+    ghostSquares: [...game.ghostSquares],
+    stickySquares: [...game.stickySquares],
+    backupPlanActive: { ...game.backupPlanActive },
   };
 }
 
@@ -96,8 +106,10 @@ class Game {
 
     this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
     this.missingSquares = new Set();
-    this.marks = { lightning: new Set(), blackHole: new Set() };
+    this.marks = { lightning: new Set(), blackHole: new Set(), plague: new Set(), swap: new Set() };
     this.fans = [];
+    this.ghostSquares = new Set();
+    this.stickySquares = new Set();
 
     this.lastMoveSquares = [];
 
@@ -105,6 +117,7 @@ class Game {
     this.requestTimeReverse = 0;
     this.history = [];
     this.pendingTargetRules = [];
+    this.backupPlanActive = { w: false, b: false };
 
     // Mini-games.
     this.rps = null; // { round, byColor:{w,b}, pickedByColor:{w,b}, deadlineMs }
@@ -118,6 +131,17 @@ class Game {
       }
       if (ruleId === "dur_tiles_disappear_6") {
         this.missingSquares = new Set();
+      }
+      if (ruleId === "dur_haunted_board_5") {
+        this.ghostSquares = new Set();
+      }
+      if (ruleId === "dur_sticky_squares_6") {
+        this.stickySquares = new Set();
+        for (const piece of this.state.board) {
+          if (!piece) continue;
+          delete piece._stickyLocked;
+          piece.tags = (piece.tags || []).filter((tag) => tag !== "stickyStuck");
+        }
       }
     };
   }
@@ -154,14 +178,19 @@ class Game {
     this.trailBlocks = [];
     this.requestTimeReverse = 0;
     this.pendingTargetRules = [];
+    this.backupPlanActive = { w: false, b: false };
+    this.ghostSquares = new Set();
+    this.stickySquares = new Set();
 
     if (!keepRules) {
       this.ruleManager = new RuleManager(this);
       this.permanent = defaultPermanentFlags();
       this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
       this.missingSquares = new Set();
-      this.marks = { lightning: new Set(), blackHole: new Set() };
+      this.marks = { lightning: new Set(), blackHole: new Set(), plague: new Set(), swap: new Set() };
       this.fans = [];
+      this.ghostSquares = new Set();
+      this.stickySquares = new Set();
     }
   }
 
@@ -181,12 +210,24 @@ class Game {
     if (pending.playerId !== playerId) return { ok: false, error: "Waiting for the other player to choose a target" };
     if (square == null || square < 0 || square > 63) return { ok: false, error: "Bad target" };
 
+    if (pending.ruleId === "inst_lawnmower") {
+      const rank = idxToRank(square);
+      const res = this.runLawnmower(rank, pending.color);
+      if (!res.ok) return res;
+      this.pendingTargetRules.shift();
+      this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+      this.evaluateGameEnd();
+      if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+      return { ok: true };
+    }
+
     const piece = this.state.board[square];
     if (!piece || piece.color !== pending.color || piece.color === "x") return { ok: false, error: "Choose one of your own pieces" };
 
     let res = { ok: false, error: "Unknown targeted rule" };
     if (pending.ruleId === "inst_titan") res = this.makeTitan(square, pending.color);
     if (pending.ruleId === "inst_suicide_bomber") res = this.armSuicideBomber(square, pending.color);
+    if (pending.ruleId === "inst_backup_plan") res = this.assignBackupVital(square, pending.color);
     if (!res.ok) return res;
 
     this.pendingTargetRules.shift();
@@ -282,6 +323,56 @@ class Game {
     return { ok: true };
   }
 
+  assignBackupVital(square, color) {
+    const piece = this.state.board[square];
+    if (!piece || piece.color !== color || piece.color === "x" || piece.type === "k") {
+      return { ok: false, error: "Choose one of your non-king pieces" };
+    }
+    for (const p of this.state.board) {
+      if (p && p._backupVital === color) delete p._backupVital;
+    }
+    piece._backupVital = color;
+    this.backupPlanActive[color] = true;
+    this.effects.push({ type: "rule", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} set a backup plan.` });
+    return { ok: true };
+  }
+
+  findBackupVitalSquare(color) {
+    if (!this.backupPlanActive?.[color]) return null;
+    for (let i = 0; i < 64; i++) {
+      const p = this.state.board[i];
+      if (p && p.color === color && p._backupVital === color) return i;
+    }
+    return null;
+  }
+
+  syncDynamicMarks() {
+    this.marks.plague.clear();
+    for (let i = 0; i < 64; i++) {
+      if (this.state.board[i]?._plagueInfected) this.marks.plague.add(i);
+    }
+  }
+
+  runLawnmower(rank, color) {
+    if (typeof rank !== "number" || rank < 0 || rank > 7) return { ok: false, error: "Choose a valid row" };
+    const row = [];
+    for (let file = 0; file < 8; file++) {
+      const sq = toIdx(file, rank);
+      row.push(sq);
+      if (this.state.board[sq]?.type === "k") return { ok: false, error: "You can't choose a row with a king on it" };
+    }
+    const destroyed = [];
+    for (const sq of row) {
+      if (!this.state.board[sq]) continue;
+      this.state.board[sq] = null;
+      destroyed.push(sq);
+    }
+    this.effects.push({ type: "lawnmower", id: this.nextEffectId(), row: rank, color, squares: row });
+    if (destroyed.length) this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: destroyed, reason: "lawnmower" });
+    this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Lawnmower cleared row ${rank + 1}.` });
+    return { ok: true };
+  }
+
   start(players) {
     this.started = true;
     this.players = players.map((p) => ({ id: p.id, name: p.name, color: p.color }));
@@ -299,8 +390,10 @@ class Game {
 
   currentModifiers() {
     const mods = this.ruleManager.computeModifiers();
+    if (this.colourBlindPlies > 0) mods.friendlyFire = true;
     mods.missingSquares = this.missingSquares;
     mods.shield = this.shield;
+    mods.stickySquares = this.stickySquares;
     return mods;
   }
 
@@ -740,8 +833,23 @@ class Game {
 
     const wKing = this.findKingSquare("w");
     const bKing = this.findKingSquare("b");
-    if (wKing == null || bKing == null) {
-      const loser = wKing == null ? "w" : "b";
+    const wVital = this.findBackupVitalSquare("w");
+    const bVital = this.findBackupVitalSquare("b");
+    if ((this.backupPlanActive.w && wVital == null) || (this.backupPlanActive.b && bVital == null)) {
+      const loser = this.backupPlanActive.w && wVital == null ? "w" : "b";
+      const winner = loser === "w" ? "b" : "w";
+      const loserName = loser === "w" ? "White" : "Black";
+      this.setResult({
+        winner,
+        loser,
+        reason: "backup_lost",
+        detail: `${loserName}'s backup-plan piece was destroyed.`,
+      });
+      return true;
+    }
+
+    if ((wKing == null && !this.backupPlanActive.w) || (bKing == null && !this.backupPlanActive.b)) {
+      const loser = wKing == null && !this.backupPlanActive.w ? "w" : "b";
       const winner = loser === "w" ? "b" : "w";
       const loserName = loser === "w" ? "White" : "Black";
       this.setResult({
@@ -758,6 +866,7 @@ class Game {
     const legal = generateLegalMoves(this.state, color, mods);
     if (legal.length === 0) {
       const inCheck = require("./ChessEngine").isInCheck(this.state, color, mods);
+      if (inCheck && this.backupPlanActive?.[color] && this.findBackupVitalSquare(color) != null) return false;
       const loser = color;
       const winner = other(color);
       const loserName = loser === "w" ? "White" : "Black";
@@ -810,6 +919,45 @@ class Game {
         this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "asteroid" });
       }
       this.hazards.asteroid.delete(toSquare);
+    }
+  }
+
+  noteCaptureSquare(square) {
+    if (square == null) return;
+    const mods = this.currentModifiers();
+    if (mods.hauntedBoard) this.ghostSquares.add(square);
+  }
+
+  demotePieceForGhostPath(pathSquares, finalSquare) {
+    const mods = this.currentModifiers();
+    if (!mods.hauntedBoard || !pathSquares?.some((sq) => sq !== pathSquares[0] && this.ghostSquares.has(sq))) return;
+    const piece = this.state.board[finalSquare];
+    if (!piece || piece.color === "x" || piece.type === "k") return;
+    const next = DEMOTE_TYPE[piece.type];
+    if (!next || next === piece.type) return;
+    piece.type = next;
+    piece.tags = [...new Set([...(piece.tags || []), "haunted"])];
+    this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Haunted Board demoted a piece at ${this.squareName(finalSquare)}.` });
+  }
+
+  clearStickyLocks(color) {
+    for (const piece of this.state.board) {
+      if (!piece || piece.color !== color || !piece._stickyLocked) continue;
+      delete piece._stickyLocked;
+      piece.tags = (piece.tags || []).filter((tag) => tag !== "stickyStuck");
+    }
+  }
+
+  applyStickyLanding(square) {
+    const mods = this.currentModifiers();
+    if (!mods.stickySquaresActive || square == null) return;
+    const piece = this.state.board[square];
+    if (!piece || piece.color === "x") return;
+    const wasSticky = this.stickySquares.has(square);
+    this.stickySquares.add(square);
+    if (wasSticky) {
+      piece._stickyLocked = true;
+      piece.tags = [...new Set([...(piece.tags || []), "stickyStuck"])];
     }
   }
 
@@ -904,15 +1052,15 @@ class Game {
 
   // Teleporter corners: if a piece just landed on a corner, send it somewhere random.
   applyTeleporterCorner(sq) {
-    if (!CORNER_SQUARES.has(sq)) return;
+    if (!CORNER_SQUARES.has(sq)) return sq;
     const p = this.state.board[sq];
-    if (!p || p.color === "x") return;
+    if (!p || p.color === "x") return sq;
 
     const empties = [];
     for (let i = 0; i < 64; i++) {
       if (!this.state.board[i] && !this.missingSquares.has(i) && !CORNER_SQUARES.has(i)) empties.push(i);
     }
-    if (!empties.length) return;
+    if (!empties.length) return sq;
 
     const dest = empties[Math.floor(Math.random() * empties.length)];
     this.state.board[dest] = { ...p, moved: true };
@@ -926,6 +1074,7 @@ class Game {
       piece: serializeBoard([p])[0],
     });
     this.effects.push({ type: "log", id: this.nextEffectId(), text: `Teleporter! Piece zapped from corner to ${String.fromCharCode(97 + idxToFile(dest))}${idxToRank(dest) + 1}.` });
+    return dest;
   }
 
   // Fog of War: compute visible squares for a given player color (within radius 1 of any friendly piece).
@@ -1155,8 +1304,13 @@ class Game {
     this.marks = {
       lightning: new Set(snap.marks?.lightning || []),
       blackHole: new Set(snap.marks?.blackHole || []),
+      plague: new Set(snap.marks?.plague || []),
+      swap: new Set(snap.marks?.swap || []),
     };
     this.fans = (snap.fans || []).map((fan) => ({ ...fan }));
+    this.ghostSquares = new Set(snap.ghostSquares || []);
+    this.stickySquares = new Set(snap.stickySquares || []);
+    this.backupPlanActive = { ...this.backupPlanActive, ...(snap.backupPlanActive || {}) };
     this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Time reversed ${plies} turns!` });
     return true;
   }
@@ -1259,6 +1413,7 @@ class Game {
 
     const piece = this.state.board[from];
     if (!piece || piece.color !== color) return { ok: false, error: "No piece" };
+    if (piece._stickyLocked) return { ok: false, error: "That piece is stuck this turn" };
 
     const mods = this.currentModifiers();
     if (this.isTitan(piece)) {
@@ -1284,6 +1439,8 @@ class Game {
       if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
       if (mods.randomShift) this.applyRandomShift();
       if (mods.vanishingTiles) this.refreshVanishingTiles();
+      this.clearStickyLocks(color);
+      this.applyStickyLanding(finalTo);
       if (mods.moveTwice) this.extraMoves[color] += 1;
 
       if (this.extraMoves[color] > 0) {
@@ -1320,7 +1477,9 @@ class Game {
     this.history.push(deepCloneState(this));
     if (this.history.length > 20) this.history.shift();
 
-    const capture = !!this.state.board[to] || (piece.type === "p" && this.state.enPassant != null && to === this.state.enPassant);
+    const enPassantCapture = piece.type === "p" && this.state.enPassant != null && to === this.state.enPassant && !this.state.board[to];
+    const capture = !!this.state.board[to] || enPassantCapture;
+    const captureSquare = enPassantCapture ? toIdx(idxToFile(to), idxToRank(to) + (piece.color === "w" ? -1 : 1)) : capture ? to : null;
 
     const next = applyMoveNoValidation(this.state, { from, to, promotion }, mods);
     this.state = next;
@@ -1354,6 +1513,8 @@ class Game {
       }
     }
 
+    this.demotePieceForGhostPath(this.movePathSquares(from, finalTo), finalTo);
+
     // Echo Trail.
     if (mods.echoTrail) {
       const movedPiece = this.state.board[finalTo];
@@ -1373,8 +1534,7 @@ class Game {
 
     // Teleporter corners.
     if (mods.teleporterCorners) {
-      this.applyTeleporterCorner(finalTo);
-      // finalTo may be stale after teleport, but we don't need to track it further.
+      finalTo = this.applyTeleporterCorner(finalTo);
     }
 
     // Chain explosions on capture.
@@ -1428,6 +1588,8 @@ class Game {
     // Suicide bomber detonates after its final landing square is known.
     this.applySuicideBomberIfNeeded(finalTo);
 
+    if (capture) this.noteCaptureSquare(captureSquare);
+
     // King of the Hill: promote pieces on central squares.
     if (mods.kingOfHill) this.applyKingOfHill();
 
@@ -1435,6 +1597,9 @@ class Game {
     if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
     if (mods.randomShift) this.applyRandomShift();
     if (mods.vanishingTiles) this.refreshVanishingTiles();
+
+    this.clearStickyLocks(color);
+    this.applyStickyLanding(finalTo);
 
     // Move-twice.
     if (mods.moveTwice) this.extraMoves[color] += 1;
@@ -1474,11 +1639,12 @@ class Game {
     return { ok: true };
   }
 
-  toClientState() {
+  toClientState(playerId = null) {
     this.enforceRuleChoiceTimeoutIfNeeded();
     this.enforceBonusRuleChoiceTimeoutIfNeeded();
     this.enforceMiniGameTimeoutIfNeeded();
     this.enforceWagerTimeoutIfNeeded();
+    this.syncDynamicMarks();
     const mods = this.currentModifiers();
     const inCheck = require("./ChessEngine").isInCheck(this.state, this.state.turn, mods);
     const checkLabel = inCheck ? (this.state.turn === "w" ? "White" : "Black") : null;
@@ -1512,8 +1678,12 @@ class Game {
     const marks = {
       lightning: [...(this.marks?.lightning || [])],
       blackHole: [...(this.marks?.blackHole || [])],
+      plague: [...(this.marks?.plague || [])],
+      swap: [...(this.marks?.swap || [])],
     };
     const pendingTarget = this.currentPendingTarget();
+    const requestingColor = this.players.find((p) => p.id === playerId)?.color || null;
+    const backupVitalSquare = requestingColor ? this.findBackupVitalSquare(requestingColor) : null;
 
     return {
       roomCode: this.roomCode,
@@ -1537,6 +1707,9 @@ class Game {
       marks,
       permanent: { ...this.permanent },
       missingSquares: [...this.missingSquares],
+      ghostSquares: [...this.ghostSquares],
+      stickySquares: [...this.stickySquares],
+      backupVitalSquare,
       visualFlip: this.visualFlipPlies > 0,
       colourBlind: this.colourBlindPlies > 0,
       lastMoveSquares: this.lastMoveSquares,

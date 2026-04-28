@@ -79,6 +79,18 @@ function randomPieceSquare(game, color, filterFn) {
   return squares[randInt(squares.length)];
 }
 
+function randomAnyPieceSquare(game, filterFn) {
+  const squares = [];
+  for (let i = 0; i < 64; i++) {
+    const p = game.state.board[i];
+    if (!p) continue;
+    if (filterFn && !filterFn(p, i)) continue;
+    squares.push(i);
+  }
+  if (!squares.length) return null;
+  return squares[randInt(squares.length)];
+}
+
 function destroySquares(game, squares, reason) {
   const destroyed = [];
   for (const sq of squares) {
@@ -457,6 +469,35 @@ const RULES = [
     },
   },
   {
+    id: "inst_lawnmower",
+    kind: "instant",
+    name: "Lawnmower",
+    description: "Choose a row with no king on it. A lawnmower crosses from the left and deletes every piece it touches.",
+    apply(game, ctx) {
+      game.enqueueTargetRule?.({
+        ruleId: "inst_lawnmower",
+        playerId: ctx?.playerId,
+        color: ctx?.color,
+        prompt: "Choose a row with no king on it for the lawnmower.",
+      });
+    },
+  },
+  {
+    id: "inst_backup_plan",
+    kind: "instant",
+    name: "Backup Plan",
+    description: "Choose one of your non-king pieces as your secret vital piece. If it dies, you lose; your king no longer ends the game.",
+    permanentCard: true,
+    apply(game, ctx) {
+      game.enqueueTargetRule?.({
+        ruleId: "inst_backup_plan",
+        playerId: ctx?.playerId,
+        color: ctx?.color,
+        prompt: "Choose one of your non-king pieces as your secret backup piece.",
+      });
+    },
+  },
+  {
     id: "inst_peasant_revolt",
     kind: "instant",
     name: "Peasant Revolt",
@@ -546,7 +587,7 @@ const RULES = [
     id: "inst_colour_blind",
     kind: "instant",
     name: "Colour Blind",
-    description: "For 4 turns, pieces lose their colour markings — neither player can tell friend from foe visually. Captures still work normally.",
+    description: "For 4 turns, pieces lose their colour markings and friendly fire is enabled.",
     apply(game) {
       game.colourBlindPlies = Math.max(game.colourBlindPlies || 0, 4);
       game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Colour Blind! You can't tell friend from foe for 4 turns." });
@@ -569,6 +610,76 @@ const RULES = [
         p.type = types[randInt(types.length)];
       }
       game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Mutation complete." });
+    },
+  },
+  {
+    id: "del_plague_6",
+    kind: "delayed",
+    delayTurns: 6,
+    name: "Plague",
+    description: "A random piece is infected now. Each turn it spreads to one adjacent piece. In 6 turns, all infected pieces die.",
+    onSchedule(game, inst) {
+      const start = randomAnyPieceSquare(game, (p) => p.color !== "x" && p.type !== "k");
+      inst.data.infected = start == null ? [] : [start];
+      if (start != null) {
+        game.state.board[start]._plagueInfected = true;
+        game.marks.plague.add(start);
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: `Plague infected ${idxToAlg(start)}.` });
+      }
+    },
+    onTick(game, inst) {
+      const infected = new Set();
+      game.marks.plague.clear();
+      for (let i = 0; i < 64; i++) {
+        if (game.state.board[i]?._plagueInfected) {
+          infected.add(i);
+          game.marks.plague.add(i);
+        }
+      }
+      const candidates = [];
+      for (const sq of infected) {
+        for (const adj of squaresAdjacent(sq)) {
+          if (infected.has(adj)) continue;
+          const p = game.state.board[adj];
+          if (!p || p.color === "x" || p.type === "k") continue;
+          candidates.push(adj);
+        }
+      }
+      if (!candidates.length) return;
+      const next = candidates[randInt(candidates.length)];
+      infected.add(next);
+      game.state.board[next]._plagueInfected = true;
+      inst.data.infected = [...infected];
+      game.marks.plague.add(next);
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `Plague spread to ${idxToAlg(next)}.` });
+    },
+    apply(game, ctx) {
+      const infected = [];
+      for (let i = 0; i < 64; i++) if (game.state.board[i]?._plagueInfected) infected.push(i);
+      for (const sq of infected) game.marks.plague.delete(sq);
+      destroySquares(game, infected, "plague");
+    },
+  },
+  {
+    id: "del_the_swap_5",
+    kind: "delayed",
+    delayTurns: 5,
+    name: "The Swap",
+    description: "Two random squares are marked now. In 5 turns, whatever pieces are standing there swap positions.",
+    onSchedule(game, inst) {
+      const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i));
+      const chosen = pickN(candidates, 2);
+      inst.data.swapSquares = chosen;
+      for (const sq of chosen) game.marks.swap.add(sq);
+      game.effects.push({ type: "log", id: game.nextEffectId(), text: `The Swap marked ${chosen.map(idxToAlg).join(" and ")}.` });
+    },
+    apply(game, ctx) {
+      const squares = ctx?.inst?.data?.swapSquares || [];
+      for (const sq of squares) game.marks.swap.delete(sq);
+      if (squares.length !== 2) return;
+      swapPieces(game, squares[0], squares[1]);
+      game.effects.push({ type: "move", style: "teleport", id: game.nextEffectId(), from: squares[0], to: squares[1], piece: game.state.board[squares[1]] || null });
+      game.effects.push({ type: "move", style: "teleport", id: game.nextEffectId(), from: squares[1], to: squares[0], piece: game.state.board[squares[0]] || null });
     },
   },
   {
@@ -1199,6 +1310,46 @@ const RULES = [
     description: "For 4 turns, every move is also mirrored along the vertical axis. If the mirror square is occupied, that piece is destroyed.",
     modifiers() {
       return { echoChamber: true };
+    },
+  },
+  {
+    id: "dur_bumper_board_5",
+    kind: "duration",
+    durationTurns: 5,
+    name: "Bumper Board",
+    description: "For 5 turns, pieces that would move off the edge bounce back in the direction they came from.",
+    modifiers() {
+      return { bumperBoard: true };
+    },
+  },
+  {
+    id: "dur_friendly_fire_4",
+    kind: "duration",
+    durationTurns: 4,
+    name: "Friendly Fire",
+    description: "For 4 turns, captures are still legal, and you can also capture your own pieces.",
+    modifiers() {
+      return { friendlyFire: true };
+    },
+  },
+  {
+    id: "dur_haunted_board_5",
+    kind: "duration",
+    durationTurns: 5,
+    name: "Haunted Board",
+    description: "For 5 turns, captured-on squares become ghost squares. Pieces passing through them lose 1 tier.",
+    modifiers() {
+      return { hauntedBoard: true };
+    },
+  },
+  {
+    id: "dur_sticky_squares_6",
+    kind: "duration",
+    durationTurns: 6,
+    name: "Sticky Squares",
+    description: "For 6 turns, landed-on squares become sticky. Pieces landing on sticky squares can't move next turn.",
+    modifiers() {
+      return { stickySquaresActive: true };
     },
   },
 ];

@@ -76,6 +76,7 @@ const state = {
   flipVisual: false,
   particles: [],
   animations: [],
+  lawnmowers: [],
   lastEffectsSeen: new Set(),
   lastChoiceKey: null,
   lastStateAt: 0,
@@ -351,6 +352,10 @@ function activeRuleIds(s) {
   return new Set((s?.activeRules || []).map((r) => r.id));
 }
 
+function isFriendlyFireActive(s) {
+  return !!s?.colourBlind || (s?.activeRules || []).some((r) => r.id === "dur_friendly_fire_4");
+}
+
 function drawTileGlyph(sq, drawFn) {
   const { x, y } = squareToCanvasCenter(sq);
   const size = els.canvas.width / 8;
@@ -414,6 +419,79 @@ function drawAsteroidTile(sq, t) {
       ctx.beginPath();
       ctx.arc(px, py, size * (0.055 + i * 0.01), 0, Math.PI * 2);
       ctx.fill();
+      ctx.stroke();
+    }
+  });
+}
+
+function drawPlagueTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    const pulse = 0.5 + 0.5 * Math.sin(t / 220 + sq);
+    ctx.fillStyle = `rgba(122, 255, 102, ${0.20 + pulse * 0.16})`;
+    ctx.strokeStyle = `rgba(122, 255, 102, ${0.58 + pulse * 0.28})`;
+    ctx.lineWidth = Math.max(2, size * 0.035);
+    ctx.beginPath();
+    ctx.arc(x, y, size * (0.25 + pulse * 0.04), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    for (let i = 0; i < 5; i++) {
+      const a = t / 450 + i * 1.25;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * size * 0.22, y + Math.sin(a) * size * 0.22, size * 0.035, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+}
+
+function drawSwapTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.9)";
+    ctx.lineWidth = Math.max(2, size * 0.035);
+    ctx.setLineDash([size * 0.08, size * 0.06]);
+    ctx.lineDashOffset = -t / 34;
+    ctx.strokeRect(x - size * 0.34, y - size * 0.34, size * 0.68, size * 0.68);
+    ctx.setLineDash([]);
+    ctx.font = `${Math.floor(size * 0.28)}px "Segoe UI Symbol", sans-serif`;
+    ctx.fillStyle = "rgba(255, 209, 102, 0.94)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("\u21c4", x, y);
+  });
+}
+
+function drawGhostTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    const a = 0.22 + Math.sin(t / 360 + sq) * 0.06;
+    ctx.fillStyle = `rgba(210, 230, 255, ${a})`;
+    ctx.beginPath();
+    ctx.arc(x, y - size * 0.04, size * 0.22, Math.PI, 0);
+    ctx.lineTo(x + size * 0.22, y + size * 0.2);
+    ctx.quadraticCurveTo(x + size * 0.1, y + size * 0.12, x, y + size * 0.2);
+    ctx.quadraticCurveTo(x - size * 0.1, y + size * 0.12, x - size * 0.22, y + size * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(15, 22, 38, 0.46)";
+    ctx.beginPath();
+    ctx.arc(x - size * 0.07, y - size * 0.04, size * 0.025, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.07, y - size * 0.04, size * 0.025, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawStickyTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    const g = ctx.createRadialGradient(x, y, size * 0.05, x, y, size * 0.42);
+    g.addColorStop(0, "rgba(255, 209, 102, 0.34)");
+    g.addColorStop(1, "rgba(255, 79, 139, 0.05)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.48)";
+    ctx.lineWidth = Math.max(2, size * 0.025);
+    for (let i = 0; i < 3; i++) {
+      const yy = y - size * 0.18 + i * size * 0.18 + Math.sin(t / 300 + i) * size * 0.02;
+      ctx.beginPath();
+      ctx.moveTo(x - size * 0.24, yy);
+      ctx.quadraticCurveTo(x, yy + size * 0.08, x + size * 0.24, yy);
       ctx.stroke();
     }
   });
@@ -513,6 +591,20 @@ function drawBoardEffects(s, t) {
     }
   }
 
+  if (ids.has("dur_bumper_board_5")) {
+    ctx.strokeStyle = "rgba(255, 79, 139, 0.86)";
+    ctx.lineWidth = Math.max(4, size * 0.055);
+    ctx.setLineDash([size * 0.1, size * 0.08]);
+    ctx.lineDashOffset = t / 32;
+    ctx.strokeRect(size * 0.08, size * 0.08, els.canvas.width - size * 0.16, els.canvas.height - size * 0.16);
+    ctx.setLineDash([]);
+  }
+
+  if (ids.has("dur_friendly_fire_4") || s.colourBlind) {
+    ctx.fillStyle = "rgba(255, 79, 139, 0.08)";
+    ctx.fillRect(0, 0, els.canvas.width, els.canvas.height);
+  }
+
   if (ids.has("dur_king_of_hill_6")) {
     for (const sq of [27, 28, 35, 36]) {
       drawTileGlyph(sq, (x, y, tile) => {
@@ -532,6 +624,10 @@ function drawBoardEffects(s, t) {
   }
 
   for (const sq of s.marks?.blackHole || []) drawBlackHoleTile(sq, t);
+  for (const sq of s.marks?.plague || []) drawPlagueTile(sq, t);
+  for (const sq of s.marks?.swap || []) drawSwapTile(sq, t);
+  for (const sq of s.ghostSquares || []) drawGhostTile(sq, t);
+  for (const sq of s.stickySquares || []) drawStickyTile(sq, t);
   for (const sq of s.hazards?.asteroid || []) drawAsteroidTile(sq, t);
   for (const fan of s.fans || []) drawFanVisual(fan, t);
 }
@@ -644,6 +740,7 @@ function draw() {
     drawPiece(sq, p);
   }
   for (const { sq, p } of titans) drawTitanPiece(sq, p);
+  drawLawnmowers(t);
   drawAnimations(t);
 
   // Particles.
@@ -771,6 +868,40 @@ function drawAnimations(t) {
   state.animations = next;
 }
 
+function queueLawnmower(effect) {
+  if (typeof effect.row !== "number") return;
+  const now = nowMs();
+  state.lawnmowers.push({ row: effect.row, start: now, end: now + 950 });
+}
+
+function drawLawnmowers(t) {
+  const next = [];
+  const size = els.canvas.width / 8;
+  for (const mower of state.lawnmowers) {
+    const p = Math.min(1, Math.max(0, (t - mower.start) / Math.max(1, mower.end - mower.start)));
+    const y = squareToCanvasCenter(toIdxSafe(0, mower.row)).y;
+    const x = -size * 0.45 + (els.canvas.width + size * 0.9) * p;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = "rgba(156, 255, 107, 0.92)";
+    ctx.strokeStyle = "rgba(16, 24, 39, 0.78)";
+    ctx.lineWidth = Math.max(2, size * 0.025);
+    ctx.beginPath();
+    ctx.roundRect(-size * 0.28, -size * 0.16, size * 0.56, size * 0.32, size * 0.06);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+    for (let i = -1; i <= 1; i += 2) {
+      ctx.beginPath();
+      ctx.arc(i * size * 0.2, size * 0.17, size * 0.06, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    if (p < 1) next.push(mower);
+  }
+  state.lawnmowers = next;
+}
+
 function drawPiece(sq, p) {
   const { x, y } = squareToCanvasCenter(sq);
   drawPieceAt(x, y, p, sq);
@@ -847,6 +978,14 @@ function drawPieceAt(x, y, p, sq = null) {
     ctx.strokeText("\u{1F4A3}", x + size * 0.25, y - size * 0.25);
     ctx.fillText("\u{1F4A3}", x + size * 0.25, y - size * 0.25);
   }
+  if (sq != null && state.serverState?.backupVitalSquare === sq) {
+    ctx.font = `${Math.floor(size * 0.2)}px "Segoe UI Symbol", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#ff4f8b";
+    ctx.strokeStyle = "rgba(0,0,0,0.42)";
+    ctx.lineWidth = 2;
+    ctx.strokeText("\u2665", x - size * 0.26, y - size * 0.27);
+    ctx.fillText("\u2665", x - size * 0.26, y - size * 0.27);
+  }
 }
 
 function drawTitanPiece(sq, p) {
@@ -920,6 +1059,13 @@ function ruleArtIcon(ruleId, ruleName) {
   const hay = `${id} ${name}`;
 
   if (hay.includes("black hole")) return "\u25CF";
+  if (hay.includes("plague")) return "\u2623";
+  if (hay.includes("lawnmower")) return "\u25AC";
+  if (hay.includes("backup")) return "\u2665";
+  if (hay.includes("sticky")) return "\u25CD";
+  if (hay.includes("haunted")) return "\u25D6";
+  if (hay.includes("friendly fire")) return "\u26A0";
+  if (hay.includes("bumper")) return "\u21A9";
   if (hay.includes("ice") || hay.includes("slippery")) return "\u2744";
   if (hay.includes("gravity")) return "\u2193";
   if (hay.includes("fog") || hay.includes("invisible")) return "\u25D0";
@@ -1503,6 +1649,10 @@ function handleEffects() {
       if (e.style === "fan") spawnParticles([e.to].filter((sq) => sq != null), "rgba(123,211,255,0.72)");
       if (e.style === "ice") spawnParticles([e.to].filter((sq) => sq != null), "rgba(220,250,255,0.84)");
     }
+    if (e.type === "lawnmower") {
+      queueLawnmower(e);
+      spawnParticles(e.squares || [], "rgba(156,255,107,0.78)");
+    }
     if (e.type === "rule") {
       playSound("rule");
       logLine(`<strong>Rule</strong>: ${escapeHtml(e.text)}`);
@@ -1677,6 +1827,16 @@ els.canvas.addEventListener("mousedown", (ev) => {
 
   // If clicking own piece, reselect.
   if (piece && piece.color === state.color) {
+    if (isFriendlyFireActive(s) && state.legalTo?.includes(sq)) {
+      const from = state.selected;
+      const to = sq;
+      state.selected = null;
+      state.legalTo = null;
+      socket.emit("game:move", { code: state.lobby, playerId: state.playerId, from, to, promotion: "q" }, (res) => {
+        if (!res?.ok) logLine(`<strong>Illegal</strong>: ${escapeHtml(res?.error || "move rejected")}`);
+      });
+      return;
+    }
     state.selected = sq;
     state.legalTo = null;
     socket.emit("game:requestMoves", { code: state.lobby, playerId: state.playerId, from: sq }, (res) => {

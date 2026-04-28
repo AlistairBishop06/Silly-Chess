@@ -17,6 +17,8 @@ Live demo: https://chaoschess.onrender.com/
 - Black Hole marks a forming square and later becomes a deadly tile.
 - Fans render a prop plus airflow; pushed pieces glide instead of snapping.
 - Ice Board adds a frosty overlay; sliding is animated.
+- Plague, The Swap, Haunted Board, Sticky Squares, Bumper Board, and Lawnmower add new marked-square and sweep effects.
+- Backup Plan adds a secret vital piece with a private heart marker visible only to its owner.
 - Gravity and wrap-around rules have persistent overlays.
 - Kings show a visible shield aura when shield charges are available.
 

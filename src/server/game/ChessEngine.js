@@ -37,7 +37,9 @@ function normalizeModifiers(mods) {
     wrapEdges: !!mods.wrapEdges,
     onlyPawnsMove: !!mods.onlyPawnsMove,
     noCapture: !!mods.noCapture,
+    friendlyFire: !!mods.friendlyFire,
     diagonalOnly: !!mods.diagonalOnly,
+    bumperBoard: !!mods.bumperBoard,
     forcedKingMove: !!mods.forcedKingMove,
     allPiecesKingLike: !!mods.allPiecesKingLike,
     knightsQueenLike: !!mods.knightsQueenLike,
@@ -49,10 +51,16 @@ function normalizeModifiers(mods) {
   };
 }
 
-function stepWithWrap(file, rank, df, dr, wrapEdges) {
+function stepWithWrap(file, rank, df, dr, wrapEdges, bumperBoard = false) {
   let nf = file + df;
   let nr = rank + dr;
-  if (!wrapEdges) return { nf, nr, ok: onBoard(nf, nr) };
+  if (!wrapEdges) {
+    if (onBoard(nf, nr)) return { nf, nr, ok: true };
+    if (!bumperBoard) return { nf, nr, ok: false };
+    nf = file - df;
+    nr = rank - dr;
+    return { nf, nr, ok: onBoard(nf, nr) };
+  }
   nf = (nf + 8) % 8;
   nr = (nr + 8) % 8;
   return { nf, nr, ok: true };
@@ -292,6 +300,7 @@ function applyMoveNoValidation(state, move, mods) {
 function generatePseudoMoves(state, color, mods) {
   const board = state.board;
   const wrapEdges = mods.wrapEdges;
+  const bumperBoard = mods.bumperBoard && !wrapEdges;
   const moves = [];
 
   function addMove(from, to, extra = {}) {
@@ -302,14 +311,16 @@ function generatePseudoMoves(state, color, mods) {
   function canLandOn(toIdx, piece) {
     const t = board[toIdx];
     if (t && t.color === "x") return false;
-    if (mods.noCapture && t && t.color !== piece.color) return false;
+    if (mods.noCapture && t) return false;
+    if (t && t.type === "k" && t.color === piece.color) return false;
     if (isMissing(mods, toIdx)) return false;
-    return !t || t.color !== piece.color;
+    return !t || t.color !== piece.color || mods.friendlyFire;
   }
 
   for (let from = 0; from < 64; from++) {
     const p = board[from];
     if (!p || p.color !== color || p.color === "x") continue;
+    if (p._stickyLocked) continue;
     if (mods.onlyPawnsMove && p.type !== "p") continue;
 
     const file = idxToFile(from);
@@ -323,16 +334,16 @@ function generatePseudoMoves(state, color, mods) {
     if (effectiveType === "p") {
       const dir = color === "w" ? 1 : -1;
       // Forward (non-capture)
-      const { nf, nr, ok } = stepWithWrap(file, rank, 0, dir, wrapEdges);
-      if (ok) {
+      const { nf, nr, ok } = stepWithWrap(file, rank, 0, dir, wrapEdges, bumperBoard);
+      if (ok && !mods.diagonalOnly) {
         const to = toIdx(nf, nr);
         if (!board[to] && !isMissing(mods, to)) addMove(from, to);
       }
       // Double step
       const startRank = color === "w" ? 1 : 6;
-      if (rank === startRank && !p.moved) {
-        const s1 = stepWithWrap(file, rank, 0, dir, wrapEdges);
-        const s2 = stepWithWrap(file, rank, 0, dir * 2, wrapEdges);
+      if (rank === startRank && !p.moved && !mods.diagonalOnly) {
+        const s1 = stepWithWrap(file, rank, 0, dir, wrapEdges, bumperBoard);
+        const s2 = stepWithWrap(file, rank, 0, dir * 2, wrapEdges, bumperBoard);
         if (s1.ok && s2.ok) {
           const mid = toIdx(s1.nf, s1.nr);
           const to = toIdx(s2.nf, s2.nr);
@@ -341,13 +352,14 @@ function generatePseudoMoves(state, color, mods) {
       }
       // Captures
       for (const df of [-1, 1]) {
-        const s = stepWithWrap(file, rank, df, dir, wrapEdges);
+        const s = stepWithWrap(file, rank, df, dir, wrapEdges, bumperBoard);
         if (!s.ok) continue;
         const to = toIdx(s.nf, s.nr);
         const t = board[to];
-        if (t && t.color !== color && t.color !== "x" && !mods.noCapture) addMove(from, to);
+        if (mods.diagonalOnly && !t && !isMissing(mods, to)) addMove(from, to);
+        if (t && t.color !== "x" && !mods.noCapture && (t.color !== color || mods.friendlyFire)) addMove(from, to);
         // En passant
-        if (!t && state.enPassant != null && to === state.enPassant && !mods.noCapture) addMove(from, to);
+        if (!mods.diagonalOnly && !t && state.enPassant != null && to === state.enPassant && !mods.noCapture) addMove(from, to);
       }
       continue;
     }
@@ -383,19 +395,30 @@ function generatePseudoMoves(state, color, mods) {
           // As queen-like, slide.
           let f = file;
           let r = rank;
+          let dirF = df;
+          let dirR = dr;
+          const visited = new Set([from]);
           for (let step = 0; step < 7; step++) {
-            const s = stepWithWrap(f, r, df, dr, wrapEdges);
+            let s = stepWithWrap(f, r, dirF, dirR, wrapEdges, bumperBoard);
             if (!s.ok) break;
+            if (bumperBoard && !onBoard(f + dirF, r + dirR)) {
+              dirF *= -1;
+              dirR *= -1;
+              s = stepWithWrap(f, r, dirF, dirR, wrapEdges, false);
+              if (!s.ok) break;
+            }
             f = s.nf;
             r = s.nr;
             const to = toIdx(f, r);
+            if (visited.has(to)) break;
+            visited.add(to);
             if (isMissing(mods, to)) break;
             if (!canLandOn(to, p)) break;
             addMove(from, to);
             if (board[to]) break;
           }
         } else {
-          const s = stepWithWrap(file, rank, df, dr, wrapEdges);
+          const s = stepWithWrap(file, rank, df, dr, wrapEdges, bumperBoard);
           if (!s.ok) continue;
           const to = toIdx(s.nf, s.nr);
           if (!canLandOn(to, p)) continue;
@@ -413,7 +436,7 @@ function generatePseudoMoves(state, color, mods) {
       }
       for (const [df, dr] of d) {
         if (mods.diagonalOnly && Math.abs(df) !== Math.abs(dr)) continue;
-        const s = stepWithWrap(file, rank, df, dr, wrapEdges);
+        const s = stepWithWrap(file, rank, df, dr, wrapEdges, bumperBoard);
         if (!s.ok) continue;
         const to = toIdx(s.nf, s.nr);
         if (!canLandOn(to, p)) continue;
@@ -459,12 +482,23 @@ function generatePseudoMoves(state, color, mods) {
       if (mods.diagonalOnly && Math.abs(df) !== Math.abs(dr)) continue;
       let f = file;
       let r = rank;
+      let dirF = df;
+      let dirR = dr;
+      const visited = new Set([from]);
       for (let step = 0; step < 7; step++) {
-        const s = stepWithWrap(f, r, df, dr, wrapEdges);
+        let s = stepWithWrap(f, r, dirF, dirR, wrapEdges, bumperBoard);
         if (!s.ok) break;
+        if (bumperBoard && !onBoard(f + dirF, r + dirR)) {
+          dirF *= -1;
+          dirR *= -1;
+          s = stepWithWrap(f, r, dirF, dirR, wrapEdges, false);
+          if (!s.ok) break;
+        }
         f = s.nf;
         r = s.nr;
         const to = toIdx(f, r);
+        if (visited.has(to)) break;
+        visited.add(to);
         if (isMissing(mods, to)) break;
         if (!canLandOn(to, p)) break;
         addMove(from, to);

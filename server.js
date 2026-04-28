@@ -107,15 +107,23 @@ function touchPlayerSocket({ code, entry, playerId, socket }) {
 function emitRoomState(roomCode) {
   const entry = rooms.get(roomCode);
   if (!entry) return;
-  const state = entry.room.game.toClientState();
-  emitToRoomAndPlayers(roomCode, entry, "game:state", state);
+  const sent = new Set();
+  for (const p of entry.room.players || []) {
+    if (!p?.socketId || sent.has(p.socketId)) continue;
+    sent.add(p.socketId);
+    io.to(p.socketId).emit("game:state", entry.room.game.toClientState(p.id));
+  }
 }
 
 function pushEffectsAndState(roomCode) {
   const entry = rooms.get(roomCode);
   if (!entry) return;
-  const state = entry.room.game.toClientState();
-  emitToRoomAndPlayers(roomCode, entry, "game:state", state);
+  const sent = new Set();
+  for (const p of entry.room.players || []) {
+    if (!p?.socketId || sent.has(p.socketId)) continue;
+    sent.add(p.socketId);
+    io.to(p.socketId).emit("game:state", entry.room.game.toClientState(p.id));
+  }
   entry.room.game.clearTransientEffects();
 }
 
@@ -151,7 +159,7 @@ io.on("connection", (socket) => {
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
     touchPlayerSocket({ code, entry, playerId: pid, socket });
     // Emit directly to this socket as a fallback when a room broadcast was missed.
-    io.to(socket.id).emit("game:state", entry.room.game.toClientState());
+    io.to(socket.id).emit("game:state", entry.room.game.toClientState(pid));
     cb?.({ ok: true });
   });
 
