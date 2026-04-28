@@ -55,6 +55,22 @@ const io = new Server(server);
 /** roomCode -> { room, socketsByPlayerId } */
 const rooms = new Map();
 
+function randItem(items) {
+  if (!items?.length) return null;
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function shuffled(items) {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = out[i];
+    out[i] = out[j];
+    out[j] = t;
+  }
+  return out;
+}
+
 function getPlayerIdFromSocket(room, socketId) {
   const p = room.players.find((pl) => pl.socketId === socketId);
   return p?.id || null;
@@ -71,6 +87,7 @@ function getOrRebindPlayerId({ code, room, socket, playerId }) {
   // an existing playerId that is currently disconnected (or bound to a dead socket).
   if (playerId) {
     const p = room.players.find((pl) => pl.id === playerId);
+    if (p?.bot) return null;
     const boundSocket = p?.socketId ? io.sockets.sockets.get(p.socketId) : null;
     const boundAlive = !!boundSocket && boundSocket.connected && !boundSocket.disconnected;
     if (p && p.socketId && boundAlive && p.socketId !== socket.id) return null;
@@ -98,6 +115,7 @@ function emitToRoomAndPlayers(code, entry, event, payload) {
 function touchPlayerSocket({ code, entry, playerId, socket }) {
   const p = entry.room.players.find((pl) => pl.id === playerId);
   if (!p) return;
+  if (p.bot) return;
   p.socketId = socket.id;
   p.disconnectedAt = null;
   socket.join(code);
@@ -125,6 +143,126 @@ function pushEffectsAndState(roomCode) {
     io.to(p.socketId).emit("game:state", entry.room.game.toClientState(p.id));
   }
   entry.room.game.clearTransientEffects();
+  scheduleBotTurn(roomCode);
+}
+
+function botPlayer(room) {
+  return room.players.find((p) => p.bot) || null;
+}
+
+function botLegalMoves(game, playerId) {
+  const color = game.playerColor(playerId);
+  if (color !== "w" && color !== "b") return [];
+  const moves = [];
+  for (let from = 0; from < 64; from++) {
+    const piece = game.state.board[from];
+    if (!piece || piece.color !== color) continue;
+    const toSquares = game.getLegalDestinations(playerId, from);
+    for (const to of toSquares) moves.push({ from, to, promotion: "q" });
+  }
+  return moves;
+}
+
+function botWagerSquares(game, color) {
+  const candidates = [];
+  for (let sq = 0; sq < 64; sq++) {
+    const p = game.state.board[sq];
+    if (!p || p.color !== color || p.color === "x" || p.type === "k") continue;
+    candidates.push(sq);
+  }
+  const limit = Math.min(candidates.length, Math.floor(Math.random() * 4));
+  return shuffled(candidates).slice(0, limit);
+}
+
+function botTargetSquares(game, pending) {
+  const color = pending?.color;
+  if (pending?.ruleId === "inst_lawnmower") {
+    const rows = [];
+    for (let rank = 0; rank < 8; rank++) {
+      let hasKing = false;
+      for (let file = 0; file < 8; file++) {
+        const p = game.state.board[rank * 8 + file];
+        if (p?.type === "k") hasKing = true;
+      }
+      if (!hasKing) rows.push(rank * 8);
+    }
+    return shuffled(rows);
+  }
+
+  const squares = [];
+  for (let sq = 0; sq < 64; sq++) {
+    const p = game.state.board[sq];
+    if (!p || p.color !== color || p.color === "x") continue;
+    if (pending?.ruleId === "inst_backup_plan" && p.type === "k") continue;
+    squares.push(sq);
+  }
+  return shuffled(squares);
+}
+
+function runBotAction(roomCode) {
+  const entry = rooms.get(roomCode);
+  if (!entry) return;
+  entry.botTimer = null;
+
+  const room = entry.room;
+  const game = room.game;
+  const bot = botPlayer(room);
+  if (!game || !bot) return;
+
+  let changed = false;
+
+  if (game.resultInfo) {
+    const humanReady = room.players.some((p) => !p.bot && game.readyByPlayerId?.[p.id]);
+    if (humanReady && !game.readyByPlayerId?.[bot.id]) changed = !!game.toggleReady(bot.id)?.ok;
+  } else if (game.phase === "ruleChoice") {
+    const choices = game.ruleChoicesByPlayerId?.[bot.id] || [];
+    if (!game.ruleChosenByPlayerId?.[bot.id] && choices.length) {
+      const pick = randItem(choices);
+      changed = !!game.chooseRule(bot.id, pick.id)?.ok;
+    }
+  } else if (game.phase === "bonusRuleChoice") {
+    const choices = game.ruleChoicesByPlayerId?.[bot.id] || [];
+    if (game.bonusRuleChoice?.playerId === bot.id && choices.length) {
+      const pick = randItem(choices);
+      changed = !!game.chooseRule(bot.id, pick.id)?.ok;
+    }
+  } else if (game.phase === "targetRule") {
+    const pending = game.currentPendingTarget?.();
+    if (pending?.playerId === bot.id) {
+      for (const square of botTargetSquares(game, pending)) {
+        const res = game.submitRuleTarget(bot.id, square);
+        if (res.ok) {
+          changed = true;
+          break;
+        }
+      }
+    }
+  } else if (game.phase === "rps" && game.rps) {
+    const color = game.playerColor(bot.id);
+    if (color && !game.rps.byColor?.[color]) {
+      changed = !!game.submitRpsChoice(bot.id, randItem(["rock", "paper", "scissors"]))?.ok;
+    }
+  } else if (game.phase === "wager" && game.wager?.stage === "select") {
+    const color = game.playerColor(bot.id);
+    if (color && !game.wager.confirmedByColor?.[color]) {
+      const selected = botWagerSquares(game, color);
+      const selectedOk = game.setWagerSelection(bot.id, selected);
+      const confirmedOk = selectedOk.ok ? game.confirmWager(bot.id) : selectedOk;
+      changed = !!confirmedOk.ok;
+    }
+  } else if (game.phase === "play" && game.state.turn === bot.color) {
+    const move = randItem(botLegalMoves(game, bot.id));
+    if (move) changed = !!game.tryMove(bot.id, move)?.ok;
+  }
+
+  if (changed) pushEffectsAndState(roomCode);
+}
+
+function scheduleBotTurn(roomCode) {
+  const entry = rooms.get(roomCode);
+  if (!entry || entry.botTimer) return;
+  if (!botPlayer(entry.room)) return;
+  entry.botTimer = setTimeout(() => runBotAction(roomCode), 550);
 }
 
 function getOpenPublicServers() {
@@ -169,6 +307,7 @@ io.on("connection", (socket) => {
     const room = entry.room;
     const player = room.players.find((p) => p.id === playerId);
     if (!player) return cb?.({ ok: false, error: "Player not found" });
+    if (player.bot) return cb?.({ ok: false, error: "Player not found" });
 
     // Rebind this player to the new socket id.
     touchPlayerSocket({ code, entry, playerId: player.id, socket });
@@ -189,6 +328,7 @@ io.on("connection", (socket) => {
     emitToRoomAndPlayers(code, entry, "lobby:message", { text: `${player.name} left the lobby.` });
     emitToRoomAndPlayers(code, entry, "lobby:closed", { reason: "A player left the lobby." });
 
+    if (entry.botTimer) clearTimeout(entry.botTimer);
     rooms.delete(code);
     cb?.({ ok: true });
     emitOpenServers();
@@ -209,6 +349,28 @@ io.on("connection", (socket) => {
     const player = room.addPlayer(socket.id, name || "Player 1");
     socket.join(code);
     rooms.get(code).socketsByPlayerId.set(player.id, socket.id);
+
+    cb?.({ ok: true, code, playerId: player.id, color: player.color });
+    pushEffectsAndState(code);
+    emitOpenServers();
+  });
+
+  socket.on("lobby:singleplayer", ({ name } = {}, cb) => {
+    const code = createLobbyCode((c) => rooms.has(c));
+    const room = createRoom(code, { visibility: "private" });
+    room.game = new Game({ roomCode: code, debugMode: DEBUG_MODE });
+    rooms.set(code, { room, socketsByPlayerId: new Map(), botTimer: null });
+
+    const player = room.addPlayer(socket.id, name || "Player 1");
+    const bot = room.addPlayer(null, "Chaos Bot");
+    if (bot) bot.bot = true;
+
+    socket.join(code);
+    rooms.get(code).socketsByPlayerId.set(player.id, socket.id);
+
+    if (room.players.length === 2 && !room.game.started) {
+      room.game.start(room.players);
+    }
 
     cb?.({ ok: true, code, playerId: player.id, color: player.color });
     pushEffectsAndState(code);
@@ -353,6 +515,7 @@ io.on("connection", (socket) => {
       const allGone = room.players.length > 0 && room.players.every((p) => !p.socketId);
       const oldestGoneAt = Math.min(...room.players.map((p) => p.disconnectedAt || Date.now()));
       if (allGone && Date.now() - oldestGoneAt > 2 * 60_000) {
+        if (entry.botTimer) clearTimeout(entry.botTimer);
         rooms.delete(code);
         emitOpenServers();
       } else {

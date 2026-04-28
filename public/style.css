@@ -405,7 +405,7 @@ body.is-connected .status::before {
 
 .joinGrid {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
   align-items: end;
   gap: 10px;
 }

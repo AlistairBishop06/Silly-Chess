@@ -5,6 +5,7 @@ const socket = io();
 const els = {
   status: document.getElementById("status"),
   name: document.getElementById("nameInput"),
+  singleplayerBtn: document.getElementById("singleplayerBtn"),
   createBtn: document.getElementById("createBtn"),
   createModal: document.getElementById("createModal"),
   createCloseBtn: document.getElementById("createCloseBtn"),
@@ -1494,6 +1495,15 @@ function createLobby(visibility) {
   });
 }
 
+function createSingleplayer() {
+  socket.emit("lobby:singleplayer", { name: els.name.value.trim() }, (res) => {
+    if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "singleplayer failed")}`);
+    enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
+    els.code.value = "";
+    logLine(`<strong>Lobby</strong>: Started singleplayer game against Chaos Bot.`);
+  });
+}
+
 function openJoinModal() {
   if (!els.joinModal) return;
   els.joinModal.hidden = false;
@@ -1735,6 +1745,10 @@ els.rulebookModal?.addEventListener("mousedown", (ev) => {
 
 els.createBtn.addEventListener("click", () => {
   openCreateModal();
+});
+
+els.singleplayerBtn?.addEventListener("click", () => {
+  createSingleplayer();
 });
 
 els.createPublicBtn?.addEventListener("click", () => createLobby("public"));
