@@ -581,6 +581,7 @@ const RULES = [
     onSchedule(game, inst) {
       const candidates = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i));
       inst.data.targetSq = candidates[randInt(candidates.length)];
+      if (game.marks?.blackHole) game.marks.blackHole.add(inst.data.targetSq);
       game.effects.push({ type: "log", id: game.nextEffectId(), text: `Black hole forming at ${idxToAlg(inst.data.targetSq)}.` });
     },
     apply(game, ctx) {
@@ -691,7 +692,9 @@ const RULES = [
       const rank = ctx?.inst?.data?.rank;
       const side = ctx?.inst?.data?.side;
       if (typeof rank !== "number" || (side !== "left" && side !== "right")) return;
-      game.fans.push({ rank, side, dir: side === "left" ? 1 : -1 });
+      const fan = { rank, side, dir: side === "left" ? 1 : -1 };
+      game.fans.push(fan);
+      game.applyFanRow?.(fan);
       game.effects.push({ type: "rule", id: game.nextEffectId(), text: `Fan active on row ${rank + 1}, blowing ${side === "left" ? "right" : "left"}.` });
     },
   },
@@ -804,7 +807,8 @@ const RULES = [
     description: "In 6 turns, random squares become lava.",
     becomesPermanent: true,
     apply(game) {
-      const squares = pickN([...Array(64).keys()].filter((i) => !game.missingSquares.has(i)), 10);
+      const empty = [...Array(64).keys()].filter((i) => !game.missingSquares.has(i) && !game.state.board[i]);
+      const squares = pickN(empty, Math.min(10, empty.length));
       for (const sq of squares) game.hazards.lava.add(sq);
     },
   },

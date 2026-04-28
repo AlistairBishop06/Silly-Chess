@@ -42,7 +42,7 @@ function deepCloneState(game) {
     missingSquares: [...game.missingSquares],
     extraMoves: { ...game.extraMoves },
     shield: { ...game.shield },
-    marks: { lightning: [...(game.marks?.lightning || [])] },
+    marks: { lightning: [...(game.marks?.lightning || [])], blackHole: [...(game.marks?.blackHole || [])] },
     fans: game.fans.map((fan) => ({ ...fan })),
   };
 }
@@ -96,7 +96,7 @@ class Game {
 
     this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
     this.missingSquares = new Set();
-    this.marks = { lightning: new Set() };
+    this.marks = { lightning: new Set(), blackHole: new Set() };
     this.fans = [];
 
     this.lastMoveSquares = [];
@@ -160,7 +160,7 @@ class Game {
       this.permanent = defaultPermanentFlags();
       this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
       this.missingSquares = new Set();
-      this.marks = { lightning: new Set() };
+      this.marks = { lightning: new Set(), blackHole: new Set() };
       this.fans = [];
     }
   }
@@ -917,6 +917,14 @@ class Game {
     const dest = empties[Math.floor(Math.random() * empties.length)];
     this.state.board[dest] = { ...p, moved: true };
     this.state.board[sq] = null;
+    this.effects.push({
+      type: "move",
+      style: "teleport",
+      id: this.nextEffectId(),
+      from: sq,
+      to: dest,
+      piece: serializeBoard([p])[0],
+    });
     this.effects.push({ type: "log", id: this.nextEffectId(), text: `Teleporter! Piece zapped from corner to ${String.fromCharCode(97 + idxToFile(dest))}${idxToRank(dest) + 1}.` });
   }
 
@@ -1074,9 +1082,32 @@ class Game {
       cur = next;
     }
     if (cur !== sq) {
+      this.effects.push({
+        type: "move",
+        style: "fan",
+        id: this.nextEffectId(),
+        from: sq,
+        to: cur,
+        piece: this.state.board[cur] ? serializeBoard([this.state.board[cur]])[0] : null,
+      });
       this.effects.push({ type: "log", id: this.nextEffectId(), text: `Fan blew a piece from ${this.squareName(sq)} to ${this.squareName(cur)}.` });
     }
     return cur;
+  }
+
+  applyFanRow(fan) {
+    if (!fan || typeof fan.rank !== "number" || (fan.dir !== 1 && fan.dir !== -1)) return;
+    const files = fan.dir > 0 ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
+    for (const file of files) {
+      const sq = toIdx(file, fan.rank);
+      const p = this.state.board[sq];
+      if (!p || p.color === "x" || this.isTitan(p)) continue;
+      const finalSq = this.applyFansToSquare(sq);
+      if (finalSq !== sq) {
+        this.applyHazardsAfterMove(finalSq);
+        this.applySuicideBomberIfNeeded(finalSq);
+      }
+    }
   }
 
   applySuicideBomberIfNeeded(sq) {
@@ -1121,7 +1152,10 @@ class Game {
     this.missingSquares = new Set(snap.missingSquares);
     this.extraMoves = { ...snap.extraMoves };
     this.shield = { ...snap.shield };
-    this.marks = { lightning: new Set(snap.marks?.lightning || []) };
+    this.marks = {
+      lightning: new Set(snap.marks?.lightning || []),
+      blackHole: new Set(snap.marks?.blackHole || []),
+    };
     this.fans = (snap.fans || []).map((fan) => ({ ...fan }));
     this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Time reversed ${plies} turns!` });
     return true;
@@ -1182,6 +1216,16 @@ class Game {
       this.state.board[next] = this.state.board[cur];
       this.state.board[cur] = null;
       cur = next;
+    }
+    if (cur !== to) {
+      this.effects.push({
+        type: "move",
+        style: "ice",
+        id: this.nextEffectId(),
+        from: to,
+        to: cur,
+        piece: this.state.board[cur] ? serializeBoard([this.state.board[cur]])[0] : null,
+      });
     }
     return cur;
   }
@@ -1283,6 +1327,10 @@ class Game {
     this.ply += 1;
     let finalTo = to;
     this.lastMoveSquares = [from, to];
+    const baseMovePiece = serializeBoard([this.state.board[to]])[0];
+    if (baseMovePiece) {
+      this.effects.push({ type: "move", style: "move", id: this.nextEffectId(), from, to, piece: baseMovePiece });
+    }
 
     const wouldCheckNext = require("./ChessEngine").isInCheck(this.state, this.state.turn, { ...mods, shield: { w: 0, b: 0 } });
     if (wouldCheckNext && this.shield[this.state.turn] > 0) this.shield[this.state.turn] -= 1;
@@ -1463,6 +1511,7 @@ class Game {
 
     const marks = {
       lightning: [...(this.marks?.lightning || [])],
+      blackHole: [...(this.marks?.blackHole || [])],
     };
     const pendingTarget = this.currentPendingTarget();
 
@@ -1484,7 +1533,9 @@ class Game {
       readyByPlayerId: this.readyByPlayerId,
       rematchId: this.rematchId,
       hazards,
+      shield: { ...this.shield },
       marks,
+      permanent: { ...this.permanent },
       missingSquares: [...this.missingSquares],
       visualFlip: this.visualFlipPlies > 0,
       colourBlind: this.colourBlindPlies > 0,

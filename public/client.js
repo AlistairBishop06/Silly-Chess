@@ -75,6 +75,7 @@ const state = {
   legalTo: null,
   flipVisual: false,
   particles: [],
+  animations: [],
   lastEffectsSeen: new Set(),
   lastChoiceKey: null,
   lastStateAt: 0,
@@ -346,12 +347,232 @@ function squareToCanvasCenter(sq) {
   return { x, y };
 }
 
+function activeRuleIds(s) {
+  return new Set((s?.activeRules || []).map((r) => r.id));
+}
+
+function drawTileGlyph(sq, drawFn) {
+  const { x, y } = squareToCanvasCenter(sq);
+  const size = els.canvas.width / 8;
+  ctx.save();
+  drawFn(x, y, size);
+  ctx.restore();
+}
+
+function drawPortalTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    const pulse = 0.5 + 0.5 * Math.sin(t / 260 + sq);
+    const g = ctx.createRadialGradient(x, y, size * 0.08, x, y, size * 0.48);
+    g.addColorStop(0, `rgba(244, 214, 255, ${0.58 + pulse * 0.2})`);
+    g.addColorStop(0.42, "rgba(158, 87, 255, 0.52)");
+    g.addColorStop(1, "rgba(77, 24, 144, 0.2)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    ctx.strokeStyle = "rgba(221, 174, 255, 0.88)";
+    ctx.lineWidth = Math.max(2, size * 0.035);
+    for (let i = 0; i < 2; i++) {
+      ctx.beginPath();
+      ctx.ellipse(x, y, size * (0.28 + i * 0.08), size * (0.12 + i * 0.04), t / 700 + i * 1.7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  });
+}
+
+function drawBlackHoleTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    const r = size * 0.34;
+    const g = ctx.createRadialGradient(x, y, size * 0.05, x, y, r * 1.5);
+    g.addColorStop(0, "#010207");
+    g.addColorStop(0.45, "#05060d");
+    g.addColorStop(0.62, "rgba(101, 52, 178, 0.85)");
+    g.addColorStop(1, "rgba(36, 214, 200, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 1.42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(196, 141, 255, 0.86)";
+    ctx.lineWidth = Math.max(2, size * 0.03);
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 1.2, r * 0.46, t / 620, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.42)";
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 1.35, r * 0.3, -t / 760, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+}
+
+function drawAsteroidTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    ctx.fillStyle = "rgba(154, 102, 55, 0.72)";
+    ctx.strokeStyle = "rgba(255, 218, 158, 0.68)";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const a = i * 1.7 + t / 1200;
+      const px = x + Math.cos(a) * size * 0.18;
+      const py = y + Math.sin(a * 1.2) * size * 0.16;
+      ctx.beginPath();
+      ctx.arc(px, py, size * (0.055 + i * 0.01), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  });
+}
+
+function drawFanVisual(fan, t) {
+  const rank = fan.rank;
+  if (rank == null) return;
+  const size = els.canvas.width / 8;
+  const y = squareToCanvasCenter(toIdxSafe(0, rank)).y;
+  const blowingRight = state.flipVisual ? fan.dir < 0 : fan.dir > 0;
+  const fanX = blowingRight ? -size * 0.16 : els.canvas.width + size * 0.16;
+  const bodyX = blowingRight ? size * 0.16 : els.canvas.width - size * 0.16;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(10, 18, 35, 0.92)";
+  ctx.strokeStyle = "rgba(36, 214, 200, 0.82)";
+  ctx.lineWidth = Math.max(2, size * 0.03);
+  ctx.beginPath();
+  ctx.arc(bodyX, y, size * 0.26, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.translate(bodyX, y);
+  ctx.rotate(t / 120);
+  ctx.fillStyle = "rgba(123, 211, 255, 0.76)";
+  for (let i = 0; i < 3; i++) {
+    ctx.rotate((Math.PI * 2) / 3);
+    ctx.beginPath();
+    ctx.ellipse(size * 0.12, 0, size * 0.17, size * 0.055, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(123, 211, 255, 0.5)";
+  ctx.lineWidth = Math.max(2, size * 0.026);
+  ctx.setLineDash([size * 0.18, size * 0.16]);
+  ctx.lineDashOffset = (blowingRight ? -1 : 1) * (t / 18);
+  for (let i = -1; i <= 1; i++) {
+    const yy = y + i * size * 0.18;
+    ctx.beginPath();
+    ctx.moveTo(fanX, yy);
+    ctx.lineTo(blowingRight ? els.canvas.width + size * 0.2 : -size * 0.2, yy + Math.sin(t / 300 + i) * size * 0.04);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawBoardEffects(s, t) {
+  const ids = activeRuleIds(s);
+  const size = els.canvas.width / 8;
+
+  if (ids.has("dur_ice_board_5")) {
+    const g = ctx.createLinearGradient(0, 0, els.canvas.width, els.canvas.height);
+    g.addColorStop(0, "rgba(215, 247, 255, 0.30)");
+    g.addColorStop(0.5, "rgba(123, 211, 255, 0.12)");
+    g.addColorStop(1, "rgba(238, 252, 255, 0.24)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, els.canvas.width, els.canvas.height);
+    ctx.strokeStyle = "rgba(238, 252, 255, 0.35)";
+    ctx.lineWidth = 2;
+    for (let i = -8; i < 16; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * size * 0.7 + (t % 800) / 800 * size, 0);
+      ctx.lineTo(i * size * 0.7 + size * 1.8, els.canvas.height);
+      ctx.stroke();
+    }
+  }
+
+  if (ids.has("dur_wrap_8") || s.permanent?.wrapEdges) {
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.82)";
+    ctx.lineWidth = Math.max(3, size * 0.045);
+    ctx.setLineDash([size * 0.16, size * 0.12]);
+    ctx.lineDashOffset = -t / 28;
+    ctx.strokeRect(size * 0.04, size * 0.04, els.canvas.width - size * 0.08, els.canvas.height - size * 0.08);
+    ctx.setLineDash([]);
+  }
+
+  if (ids.has("dur_gravity_6") || s.permanent?.gravity) {
+    ctx.strokeStyle = "rgba(156, 255, 107, 0.24)";
+    ctx.lineWidth = Math.max(2, size * 0.022);
+    const down = !state.flipVisual;
+    for (let file = 0; file < 8; file++) {
+      const x = squareToCanvasCenter(toIdxSafe(file, 0)).x;
+      ctx.beginPath();
+      ctx.moveTo(x, size * 0.18);
+      ctx.lineTo(x, els.canvas.height - size * 0.18);
+      ctx.stroke();
+      ctx.beginPath();
+      const tipY = down ? els.canvas.height - size * 0.18 : size * 0.18;
+      const wingY = down ? tipY - size * 0.10 : tipY + size * 0.10;
+      ctx.moveTo(x - size * 0.05, wingY);
+      ctx.lineTo(x, tipY);
+      ctx.lineTo(x + size * 0.05, wingY);
+      ctx.stroke();
+    }
+  }
+
+  if (ids.has("dur_king_of_hill_6")) {
+    for (const sq of [27, 28, 35, 36]) {
+      drawTileGlyph(sq, (x, y, tile) => {
+        ctx.fillStyle = "rgba(255, 209, 102, 0.24)";
+        ctx.strokeStyle = "rgba(255, 209, 102, 0.78)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y, tile * (0.28 + Math.sin(t / 320) * 0.025), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+    }
+  }
+
+  if (ids.has("dur_teleporter_corners_8")) {
+    for (const sq of [0, 7, 56, 63]) drawPortalTile(sq, t);
+  }
+
+  for (const sq of s.marks?.blackHole || []) drawBlackHoleTile(sq, t);
+  for (const sq of s.hazards?.asteroid || []) drawAsteroidTile(sq, t);
+  for (const fan of s.fans || []) drawFanVisual(fan, t);
+}
+
+function drawHazardGlyphs(s, t) {
+  for (const sq of s.hazards?.lava || []) {
+    drawTileGlyph(sq, (x, y, size) => {
+      ctx.fillStyle = "rgba(255, 88, 52, 0.42)";
+      ctx.beginPath();
+      ctx.arc(x, y + Math.sin(t / 280 + sq) * size * 0.03, size * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 220, 118, 0.56)";
+      ctx.beginPath();
+      ctx.arc(x - size * 0.08, y - size * 0.03, size * 0.08, 0, Math.PI * 2);
+      ctx.arc(x + size * 0.1, y + size * 0.06, size * 0.06, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  for (const sq of s.marks?.lightning || []) {
+    drawTileGlyph(sq, (x, y, size) => {
+      ctx.strokeStyle = "rgba(255, 238, 119, 0.92)";
+      ctx.fillStyle = "rgba(255, 238, 119, 0.2)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + size * 0.04, y - size * 0.32);
+      ctx.lineTo(x - size * 0.1, y);
+      ctx.lineTo(x + size * 0.08, y);
+      ctx.lineTo(x - size * 0.04, y + size * 0.32);
+      ctx.stroke();
+      ctx.fillRect(x - size * 0.32, y - size * 0.32, size * 0.64, size * 0.64);
+    });
+  }
+}
+
 function draw() {
   requestAnimationFrame(draw);
   if (!state.serverState) return;
 
   const s = state.serverState;
   const size = els.canvas.width / 8;
+  const t = nowMs();
   const fogVisible =
     s.fogOfWar && s.fogOfWarSquares && state.color ? new Set(s.fogOfWarSquares[state.color] || []) : null;
 
@@ -381,6 +602,8 @@ function draw() {
       }
     }
   }
+  drawBoardEffects(s, t);
+  drawHazardGlyphs(s, t);
 
   // Highlights.
   if (state.selected != null) {
@@ -400,26 +623,11 @@ function draw() {
     }
   }
 
-  // Fans.
-  for (const fan of s.fans || []) {
-    const rank = fan.rank;
-    if (rank == null) continue;
-    const y = squareToCanvasCenter(toIdxSafe(0, rank)).y;
-    const fromX = fan.side === "right" ? els.canvas.width - size * 0.32 : size * 0.32;
-    const toX = fan.side === "right" ? size * 0.32 : els.canvas.width - size * 0.32;
-    ctx.strokeStyle = "rgba(36,214,200,0.52)";
-    ctx.lineWidth = 5;
-    ctx.setLineDash([16, 12]);
-    ctx.beginPath();
-    ctx.moveTo(fromX, y);
-    ctx.lineTo(toX, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
   // Pieces.
   const titans = [];
+  const animatedTargets = animationHiddenSquares(t);
   for (let sq = 0; sq < 64; sq++) {
+    if (animatedTargets.has(sq)) continue;
     const p = s.board[sq];
     if (!p) continue;
     if (p.tags?.includes("titanBody")) continue;
@@ -436,9 +644,9 @@ function draw() {
     drawPiece(sq, p);
   }
   for (const { sq, p } of titans) drawTitanPiece(sq, p);
+  drawAnimations(t);
 
   // Particles.
-  const t = nowMs();
   const next = [];
   for (const part of state.particles) {
     const age = t - part.born;
@@ -493,10 +701,88 @@ function draw() {
   setOverlay(msg);
 }
 
+function animationHiddenSquares(t) {
+  const hidden = new Set();
+  for (const anim of state.animations) {
+    if (t <= anim.end && anim.to != null) hidden.add(anim.to);
+  }
+  return hidden;
+}
+
+function queueMoveAnimation(effect) {
+  if (effect.from == null || effect.to == null || !effect.piece) return;
+  const now = nowMs();
+  const style = effect.style || "move";
+  const duration = style === "teleport" ? 520 : style === "fan" ? 760 : style === "ice" ? 620 : 360;
+  const start = style === "move" ? now : now + 260;
+  state.animations.push({
+    id: effect.id,
+    from: effect.from,
+    to: effect.to,
+    piece: effect.piece,
+    style,
+    start,
+    end: start + duration,
+  });
+}
+
+function drawAnimations(t) {
+  const next = [];
+  for (const anim of state.animations) {
+    if (t < anim.start) {
+      next.push(anim);
+      continue;
+    }
+    const duration = Math.max(1, anim.end - anim.start);
+    const p = Math.min(1, Math.max(0, (t - anim.start) / duration));
+    const eased = anim.style === "fan" || anim.style === "ice" ? 1 - Math.pow(1 - p, 3) : p;
+    const a = squareToCanvasCenter(anim.from);
+    const b = squareToCanvasCenter(anim.to);
+    let x = a.x + (b.x - a.x) * eased;
+    let y = a.y + (b.y - a.y) * eased;
+
+    ctx.save();
+    if (anim.style === "teleport") {
+      const fade = p < 0.5 ? 1 - p * 1.4 : (p - 0.5) * 2;
+      x = p < 0.5 ? a.x : b.x;
+      y = p < 0.5 ? a.y : b.y;
+      ctx.globalAlpha = Math.max(0.18, Math.min(1, fade));
+      ctx.strokeStyle = "rgba(196, 141, 255, 0.72)";
+      ctx.lineWidth = Math.max(3, els.canvas.width / 8 * 0.045);
+      ctx.beginPath();
+      ctx.arc(x, y, els.canvas.width / 8 * (0.2 + Math.sin(p * Math.PI) * 0.34), 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.globalAlpha = 0.94;
+      if (anim.style === "fan") {
+        ctx.shadowColor = "rgba(123, 211, 255, 0.88)";
+        ctx.shadowBlur = 20;
+      }
+      if (anim.style === "ice") {
+        ctx.shadowColor = "rgba(220, 250, 255, 0.95)";
+        ctx.shadowBlur = 18;
+      }
+    }
+
+    drawPieceAt(x, y, anim.piece);
+    ctx.restore();
+    if (p < 1) next.push(anim);
+  }
+  state.animations = next;
+}
+
 function drawPiece(sq, p) {
   const { x, y } = squareToCanvasCenter(sq);
+  drawPieceAt(x, y, p, sq);
+}
+
+function drawPieceAt(x, y, p, sq = null) {
   const size = els.canvas.width / 8;
   const colourBlind = !!(state.serverState && state.serverState.colourBlind);
+  const shieldCharges =
+    p?.type === "k" && p?.color && state.serverState?.shield && typeof state.serverState.shield[p.color] === "number"
+      ? state.serverState.shield[p.color]
+      : 0;
   const map = {
     p: { w: "\u2659", b: "\u265F" },
     n: { w: "\u2658", b: "\u265E" },
@@ -507,11 +793,28 @@ function drawPiece(sq, p) {
   };
 
   // Subtle glow for last move.
-  if ((state.serverState.lastMoveSquares || []).includes(sq)) {
+  if (sq != null && (state.serverState.lastMoveSquares || []).includes(sq)) {
     ctx.fillStyle = "rgba(125,255,179,0.18)";
     ctx.beginPath();
     ctx.arc(x, y, size * 0.42, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  if (shieldCharges > 0) {
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs() / 260 + (sq != null ? sq : 0));
+    ctx.strokeStyle = `rgba(123, 211, 255, ${0.45 + pulse * 0.25})`;
+    ctx.lineWidth = Math.max(2, size * 0.04);
+    ctx.beginPath();
+    ctx.arc(x, y, size * (0.44 + pulse * 0.03), 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = `rgba(255, 209, 102, ${0.18 + pulse * 0.18})`;
+    ctx.lineWidth = Math.max(2, size * 0.028);
+    for (let i = 0; i < Math.min(2, shieldCharges); i++) {
+      ctx.beginPath();
+      ctx.ellipse(x, y, size * (0.34 + i * 0.06), size * (0.16 + i * 0.03), nowMs() / 700 + i * 1.2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
@@ -616,6 +919,12 @@ function ruleArtIcon(ruleId, ruleName) {
 
   const hay = `${id} ${name}`;
 
+  if (hay.includes("black hole")) return "\u25CF";
+  if (hay.includes("ice") || hay.includes("slippery")) return "\u2744";
+  if (hay.includes("gravity")) return "\u2193";
+  if (hay.includes("fog") || hay.includes("invisible")) return "\u25D0";
+  if (hay.includes("lightning") || hay.includes("orbital")) return "\u26A1";
+  if (hay.includes("asteroid")) return "\u25C6";
   if (hay.includes("suicide bomber")) return "\u{1F4A3}";
   if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "\u{1F4A5}";
   if (hay.includes("titan")) return "\u{1F4AA}";
@@ -1187,6 +1496,12 @@ function handleEffects() {
     if (e.type === "explosion") {
       playSound("explosion");
       spawnParticles(e.squares || [], "rgba(255,107,107,0.95)");
+    }
+    if (e.type === "move") {
+      queueMoveAnimation(e);
+      if (e.style === "teleport") spawnParticles([e.from, e.to].filter((sq) => sq != null), "rgba(196,141,255,0.92)");
+      if (e.style === "fan") spawnParticles([e.to].filter((sq) => sq != null), "rgba(123,211,255,0.72)");
+      if (e.style === "ice") spawnParticles([e.to].filter((sq) => sq != null), "rgba(220,250,255,0.84)");
     }
     if (e.type === "rule") {
       playSound("rule");
