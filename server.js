@@ -6,6 +6,15 @@ const { Server } = require("socket.io");
 const { createLobbyCode, createRoom, getRoom, joinRoom, leaveRoom } = require("./src/server/lobby");
 const { Game } = require("./src/server/game/Game");
 const { allRules } = require("./src/server/game/rules/ruleset");
+const {
+  applyMoveNoValidation,
+  generateLegalMoves,
+  idxToFile,
+  idxToRank,
+  isInCheck,
+  other,
+  pieceValue,
+} = require("./src/server/game/ChessEngine");
 
 // DEBUG MODE: set `true` to enable debug-only UI/behaviour (e.g. player named "DEBUG" sees all rules at rule choice).
 const DEBUG_MODE = true;
@@ -163,6 +172,134 @@ function botLegalMoves(game, playerId) {
   return moves;
 }
 
+function cloneBotState(state) {
+  return {
+    ...state,
+    board: state.board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined } : null)),
+    castling: { w: { ...state.castling.w }, b: { ...state.castling.b } },
+    lastMove: state.lastMove ? { ...state.lastMove } : null,
+  };
+}
+
+function botMaterialScore(board, color) {
+  let score = 0;
+  for (let sq = 0; sq < 64; sq++) {
+    const p = board[sq];
+    if (!p || p.color === "x") continue;
+    const sign = p.color === color ? 1 : -1;
+    let value = pieceValue(p.type) * 100;
+    if (p.tags?.includes("titan")) value += 220;
+    if (p.tags?.includes("suicideBomber")) value += p.color === color ? 25 : -25;
+    if (p._backupVital === p.color) value += 60;
+    score += sign * value;
+  }
+  return score;
+}
+
+function botPositionalScore(board, color) {
+  let score = 0;
+  const forward = color === "w" ? 1 : -1;
+  for (let sq = 0; sq < 64; sq++) {
+    const p = board[sq];
+    if (!p || p.color === "x") continue;
+    const sign = p.color === color ? 1 : -1;
+    const file = idxToFile(sq);
+    const rank = idxToRank(sq);
+    const centerDist = Math.abs(file - 3.5) + Math.abs(rank - 3.5);
+    score += sign * (18 - centerDist * 4);
+    if (p.type === "p") {
+      const progress = p.color === "w" ? rank : 7 - rank;
+      score += sign * progress * 8;
+    }
+    if ((p.type === "n" || p.type === "b") && ((p.color === "w" && rank > 0) || (p.color === "b" && rank < 7))) {
+      score += sign * 12;
+    }
+    if (p.type === "k") {
+      const homeRank = p.color === "w" ? 0 : 7;
+      const earlyShelter = rank === homeRank && (file === 6 || file === 2) ? 18 : 0;
+      score += sign * earlyShelter;
+    }
+    if (p.color === color && p.type === "p") score += (rank - 3.5) * forward;
+  }
+  return score;
+}
+
+function botEvaluateState(state, color, mods) {
+  const opponent = other(color);
+  let score = botMaterialScore(state.board, color) + botPositionalScore(state.board, color);
+  if (isInCheck(state, opponent, mods)) score += 90;
+  if (isInCheck(state, color, mods)) score -= 140;
+
+  const mine = generateLegalMoves(state, color, mods).length;
+  const theirs = generateLegalMoves(state, opponent, mods).length;
+  score += Math.min(mine, 30) * 4 - Math.min(theirs, 30) * 5;
+
+  if (theirs === 0) score += isInCheck(state, opponent, mods) ? 100000 : 1500;
+  if (mine === 0) score -= isInCheck(state, color, mods) ? 100000 : 1500;
+  return score;
+}
+
+function botApplyMoveForSearch(state, move, mods) {
+  return applyMoveNoValidation(cloneBotState(state), move, mods);
+}
+
+function botMoveScore(game, color, move, legalMoves) {
+  const mods = game.currentModifiers();
+  const before = game.state;
+  const piece = before.board[move.from];
+  const target = before.board[move.to];
+  const next = botApplyMoveForSearch(before, move, mods);
+  const opponent = other(color);
+
+  let score = botEvaluateState(next, color, mods);
+  if (target && target.color !== color) score += pieceValue(target.type) * 160 - pieceValue(piece?.type) * 12;
+  if (piece?.type === "p" && (idxToRank(move.to) === 0 || idxToRank(move.to) === 7)) score += 750;
+  if (isInCheck(next, opponent, mods)) score += 160;
+
+  const replies = generateLegalMoves(next, opponent, mods);
+  let bestReply = -Infinity;
+  for (const reply of replies.slice(0, 40)) {
+    const replyTarget = next.board[reply.to];
+    const replyPiece = next.board[reply.from];
+    const replyNext = botApplyMoveForSearch(next, reply, mods);
+    let replyScore = botEvaluateState(replyNext, opponent, mods);
+    if (replyTarget && replyTarget.color === color) replyScore += pieceValue(replyTarget.type) * 180 - pieceValue(replyPiece?.type) * 10;
+    if (isInCheck(replyNext, color, mods)) replyScore += 140;
+    if (replyScore > bestReply) bestReply = replyScore;
+  }
+  if (Number.isFinite(bestReply)) score -= bestReply * 0.72;
+
+  const fromFile = idxToFile(move.from);
+  const fromRank = idxToRank(move.from);
+  const toFile = idxToFile(move.to);
+  const toRank = idxToRank(move.to);
+  const centerGain = Math.abs(fromFile - 3.5) + Math.abs(fromRank - 3.5) - (Math.abs(toFile - 3.5) + Math.abs(toRank - 3.5));
+  score += centerGain * 18;
+
+  // Prefer varied choices among similarly strong moves.
+  score += Math.random() * 16;
+  if (!legalMoves.length) score = -Infinity;
+  return score;
+}
+
+function chooseBotMove(game, playerId) {
+  const color = game.playerColor(playerId);
+  if (color !== "w" && color !== "b") return null;
+  const moves = botLegalMoves(game, playerId);
+  if (!moves.length) return null;
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const move of moves) {
+    const score = botMoveScore(game, color, move, moves);
+    if (score > bestScore) {
+      bestScore = score;
+      best = move;
+    }
+  }
+  return best || randItem(moves);
+}
+
 function botWagerSquares(game, color) {
   const candidates = [];
   for (let sq = 0; sq < 64; sq++) {
@@ -210,6 +347,13 @@ function runBotAction(roomCode) {
   if (!game || !bot) return;
 
   let changed = false;
+  const beforePhase = game.phase;
+  const beforeEffectSeq = game.effectSeq;
+  game.enforceRuleChoiceTimeoutIfNeeded();
+  game.enforceBonusRuleChoiceTimeoutIfNeeded();
+  game.enforceMiniGameTimeoutIfNeeded();
+  game.enforceWagerTimeoutIfNeeded();
+  changed = beforePhase !== game.phase || beforeEffectSeq !== game.effectSeq;
 
   if (game.resultInfo) {
     const humanReady = room.players.some((p) => !p.bot && game.readyByPlayerId?.[p.id]);
@@ -250,12 +394,13 @@ function runBotAction(roomCode) {
       const confirmedOk = selectedOk.ok ? game.confirmWager(bot.id) : selectedOk;
       changed = !!confirmedOk.ok;
     }
-  } else if (game.phase === "play" && game.state.turn === bot.color) {
-    const move = randItem(botLegalMoves(game, bot.id));
+  } else if (game.phase === "play" && game.state.turn === game.playerColor(bot.id)) {
+    const move = chooseBotMove(game, bot.id);
     if (move) changed = !!game.tryMove(bot.id, move)?.ok;
   }
 
   if (changed) pushEffectsAndState(roomCode);
+  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule"].includes(game.phase)) scheduleBotTurn(roomCode);
 }
 
 function scheduleBotTurn(roomCode) {
