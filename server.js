@@ -59,7 +59,14 @@ app.use(
 );
 
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  pingInterval: 25_000,
+  pingTimeout: 60_000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60_000,
+    skipMiddlewares: true,
+  },
+});
 
 /** roomCode -> { room, socketsByPlayerId } */
 const rooms = new Map();
@@ -479,6 +486,27 @@ function emitOpenServers() {
   io.emit("lobby:openServers", { servers: getOpenPublicServers() });
 }
 
+function removeRoom(code, entry) {
+  if (entry?.botTimer) clearTimeout(entry.botTimer);
+  rooms.delete(code);
+}
+
+function cleanupAbandonedRooms() {
+  const now = Date.now();
+  for (const [code, entry] of rooms.entries()) {
+    const room = entry.room;
+    const humanPlayers = (room.players || []).filter((p) => !p.bot);
+    if (!humanPlayers.length) {
+      removeRoom(code, entry);
+      continue;
+    }
+    const allHumansGone = humanPlayers.every((p) => !p.socketId);
+    if (!allHumansGone) continue;
+    const oldestGoneAt = Math.min(...humanPlayers.map((p) => p.disconnectedAt || now));
+    if (now - oldestGoneAt > 2 * 60_000) removeRoom(code, entry);
+  }
+}
+
 io.on("connection", (socket) => {
   socket.on("game:sync", ({ code, playerId } = {}, cb) => {
     const entry = rooms.get(code);
@@ -518,8 +546,7 @@ io.on("connection", (socket) => {
     emitToRoomAndPlayers(code, entry, "lobby:message", { text: `${player.name} left the lobby.` });
     emitToRoomAndPlayers(code, entry, "lobby:closed", { reason: "A player left the lobby." });
 
-    if (entry.botTimer) clearTimeout(entry.botTimer);
-    rooms.delete(code);
+    removeRoom(code, entry);
     cb?.({ ok: true });
     emitOpenServers();
   });
@@ -728,11 +755,11 @@ io.on("connection", (socket) => {
       pushEffectsAndState(code);
 
       // If everyone is gone for a while, remove the room.
-      const allGone = room.players.length > 0 && room.players.every((p) => !p.socketId);
-      const oldestGoneAt = Math.min(...room.players.map((p) => p.disconnectedAt || Date.now()));
+      const humanPlayers = room.players.filter((p) => !p.bot);
+      const allGone = humanPlayers.length > 0 && humanPlayers.every((p) => !p.socketId);
+      const oldestGoneAt = Math.min(...humanPlayers.map((p) => p.disconnectedAt || Date.now()));
       if (allGone && Date.now() - oldestGoneAt > 2 * 60_000) {
-        if (entry.botTimer) clearTimeout(entry.botTimer);
-        rooms.delete(code);
+        removeRoom(code, entry);
         emitOpenServers();
       } else {
         emitOpenServers();
@@ -755,7 +782,18 @@ setInterval(() => {
     const changed = beforePhase !== g.phase || beforeEffectSeq !== g.effectSeq;
     if (changed) pushEffectsAndState(code);
   }
+  cleanupAbandonedRooms();
 }, 500);
+
+process.on("uncaughtException", (err) => {
+  // eslint-disable-next-line no-console
+  console.error("uncaughtException", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  // eslint-disable-next-line no-console
+  console.error("unhandledRejection", reason);
+});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

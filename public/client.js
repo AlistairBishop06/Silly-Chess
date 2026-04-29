@@ -1,6 +1,12 @@
 /* global io */
 
-const socket = io();
+const socket = io({
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+});
 
 const els = {
   status: document.getElementById("status"),
