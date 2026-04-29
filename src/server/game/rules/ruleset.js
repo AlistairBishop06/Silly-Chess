@@ -1112,6 +1112,20 @@ const RULES = [
 
   // 🟢 For X Turns (original 18 + 4 new)
   {
+    id: "dur_supermarket_10",
+    kind: "duration",
+    durationTurns: 10,
+    name: "Supermarket",
+    description: "For 10 turns, a supermarket opens on a random empty tile. Landing there lets you spend 10 coins on pieces delivered by balloon crate.",
+    apply(game, ctx) {
+      const empties = [...Array(64).keys()].filter((i) => !game.state.board[i] && !game.missingSquares.has(i));
+      const sq = empties.length ? empties[randInt(empties.length)] : null;
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addSupermarket?.({ square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
     id: "dur_ice_board_5",
     kind: "duration",
     durationTurns: 5,

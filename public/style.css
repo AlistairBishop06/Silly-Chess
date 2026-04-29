@@ -1327,6 +1327,61 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   color: rgba(249, 251, 255, 0.72);
 }
 
+.supermarketCard {
+  width: min(620px, 92vw);
+}
+
+.shopGrid {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.shopItem {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.shopGlyph {
+  font-size: 30px;
+  line-height: 1;
+  text-align: center;
+}
+
+.shopMeta {
+  display: grid;
+  gap: 2px;
+}
+
+.shopMeta span {
+  color: rgba(249, 251, 255, 0.68);
+  font-size: 12px;
+}
+
+.shopStepper {
+  display: grid;
+  grid-template-columns: 36px 28px 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.shopStepper span {
+  text-align: center;
+  font-weight: 900;
+}
+
+.shopStepper button {
+  min-height: 34px;
+  padding: 6px;
+  justify-content: center;
+}
+
 .coinArea {
   margin-top: 10px;
   text-align: center;

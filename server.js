@@ -311,6 +311,20 @@ function botWagerSquares(game, color) {
   return shuffled(candidates).slice(0, limit);
 }
 
+function botSupermarketItems(budget = 10) {
+  const costs = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+  const items = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+  let remaining = Math.max(0, Number(budget) || 0);
+  while (remaining > 0) {
+    const affordable = ["q", "r", "b", "n", "p"].filter((type) => costs[type] <= remaining);
+    if (!affordable.length || Math.random() < 0.25) break;
+    const type = randItem(affordable);
+    items[type] += 1;
+    remaining -= costs[type];
+  }
+  return items;
+}
+
 function botTargetSquares(game, pending) {
   const color = pending?.color;
   if (pending?.ruleId === "inst_lawnmower") {
@@ -408,6 +422,10 @@ function runBotAction(roomCode) {
     if (pending?.playerId === bot.id) {
       changed = !!game.submitPawnSoldierShot(bot.id, botPawnSoldierTarget(game, pending))?.ok;
     }
+  } else if (game.phase === "supermarket") {
+    if (game.supermarket?.playerId === bot.id) {
+      changed = !!game.submitSupermarketPurchase(bot.id, botSupermarketItems(game.supermarket.budget))?.ok;
+    }
   } else if (game.phase === "rps" && game.rps) {
     const color = game.playerColor(bot.id);
     if (color && !game.rps.byColor?.[color]) {
@@ -427,7 +445,7 @@ function runBotAction(roomCode) {
   }
 
   if (changed) pushEffectsAndState(roomCode);
-  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "pawnSoldierShot"].includes(game.phase)) scheduleBotTurn(roomCode);
+  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "pawnSoldierShot", "supermarket"].includes(game.phase)) scheduleBotTurn(roomCode);
 }
 
 function scheduleBotTurn(roomCode) {
@@ -626,6 +644,19 @@ io.on("connection", (socket) => {
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
     touchPlayerSocket({ code, entry, playerId: pid, socket });
     const res = game.submitPawnSoldierShot(pid, target);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:supermarketPurchase", ({ code, playerId, items } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.submitSupermarketPurchase(pid, items);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
     pushEffectsAndState(code);

@@ -75,6 +75,8 @@ const HILL_SQUARES = new Set([
 ]);
 
 const HILL_PROMOTION = { p: "n", n: "b", b: "r", r: "q", q: "q" };
+const SUPERMARKET_COSTS = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+const SUPERMARKET_BUDGET = 10;
 
 class Game {
   constructor({ roomCode, debugMode = false }) {
@@ -92,7 +94,7 @@ class Game {
 
     this.state = initialState();
     this.ply = 0;
-    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "pawnSoldierShot" | "rps" | "wager"
+    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "pawnSoldierShot" | "supermarket" | "rps" | "wager"
 
     this.result = null;
     this.resultInfo = null;
@@ -104,6 +106,8 @@ class Game {
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
+    this.bonusRuleChoice = null; // active { playerId, remainingPicks }
+    this.bonusRuleChoices = []; // queued bonus choices
 
     this.effects = [];
     this.effectSeq = 1;
@@ -121,6 +125,8 @@ class Game {
     this.fans = [];
     this.ghostSquares = new Set();
     this.stickySquares = new Set();
+    this.supermarkets = [];
+    this.supermarket = null;
 
     this.lastMoveSquares = [];
 
@@ -134,7 +140,7 @@ class Game {
     // Mini-games.
     this.rps = null; // { round, byColor:{w,b}, pickedByColor:{w,b}, deadlineMs }
 
-    this.onRuleEnded = (ruleId) => {
+    this.onRuleEnded = (ruleId, inst = null) => {
       if (ruleId === "dur_trails_6") {
         for (const sq of this.trailBlocks) {
           if (this.state.board[sq]?.color === "x") this.state.board[sq] = null;
@@ -154,6 +160,12 @@ class Game {
           delete piece._stickyLocked;
           piece.tags = (piece.tags || []).filter((tag) => tag !== "stickyStuck");
         }
+      }
+      if (ruleId === "dur_supermarket_10") {
+        const instanceId = inst?.instanceId || null;
+        this.supermarkets = instanceId
+          ? this.supermarkets.filter((market) => market.instanceId !== instanceId)
+          : this.supermarkets.filter((market) => market.ruleId !== ruleId);
       }
     };
   }
@@ -177,7 +189,9 @@ class Game {
     this.history = [];
     this.rps = null;
     this.wager = null;
-    this.bonusRuleChoice = null; // { playerId, remainingPicks }
+    this.supermarket = null;
+    this.bonusRuleChoice = null;
+    this.bonusRuleChoices = [];
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
@@ -194,6 +208,7 @@ class Game {
     this.backupPlanActive = { w: false, b: false };
     this.ghostSquares = new Set();
     this.stickySquares = new Set();
+    this.supermarkets = [];
 
     if (!keepRules) {
       this.ruleManager = new RuleManager(this);
@@ -204,12 +219,24 @@ class Game {
       this.fans = [];
       this.ghostSquares = new Set();
       this.stickySquares = new Set();
+      this.supermarkets = [];
     }
   }
 
   enqueueTargetRule(targetRule) {
     if (!targetRule?.playerId || !targetRule?.color) return;
     this.pendingTargetRules.push(targetRule);
+  }
+
+  resumePendingRuleWorkOrPlay() {
+    if (this.result) return false;
+    if (this.pendingTargetRules.length > 0) {
+      this.phase = "targetRule";
+      return true;
+    }
+    if (this.resumeBonusRuleChoiceIfNeeded()) return true;
+    this.phase = "play";
+    return false;
   }
 
   currentPendingTarget() {
@@ -228,9 +255,8 @@ class Game {
       const res = this.runLawnmower(rank, pending.color);
       if (!res.ok) return res;
       this.pendingTargetRules.shift();
-      this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
       this.evaluateGameEnd();
-      if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+      this.resumePendingRuleWorkOrPlay();
       return { ok: true };
     }
 
@@ -245,9 +271,8 @@ class Game {
     if (!res.ok) return res;
 
     this.pendingTargetRules.shift();
-    this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
     this.evaluateGameEnd();
-    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+    this.resumePendingRuleWorkOrPlay();
     return { ok: true };
   }
 
@@ -410,7 +435,7 @@ class Game {
     this.pendingPawnSoldierShot = null;
     this.phase = "play";
     this.evaluateGameEnd();
-    if (this.phase === "play") this.maybeStartRuleChoice();
+    if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, pending.from)) this.maybeStartRuleChoice();
     return { ok: true };
   }
 
@@ -479,6 +504,85 @@ class Game {
     return p?.color || null;
   }
 
+  playerName(playerId) {
+    const p = this.players.find((pl) => pl.id === playerId);
+    return p?.name || (p?.color === "w" ? "White" : p?.color === "b" ? "Black" : "Player");
+  }
+
+  addSupermarket({ square, instanceId }) {
+    if (square == null || square < 0 || square > 63) return;
+    this.supermarkets.push({ square, instanceId: instanceId || null, ruleId: "dur_supermarket_10" });
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Supermarket opened at ${this.squareName(square)}.` });
+  }
+
+  maybeStartSupermarketVisit(playerId, square) {
+    if (this.result || this.phase !== "play") return false;
+    if (square == null || !this.state.board[square] || this.state.board[square]?.color === "x") return false;
+    const market = this.supermarkets.find((m) => m.square === square);
+    if (!market) return false;
+    const color = this.playerColor(playerId);
+    if (!color || this.state.board[square].color !== color) return false;
+    this.supermarket = {
+      playerId,
+      color,
+      square,
+      budget: SUPERMARKET_BUDGET,
+      costs: { ...SUPERMARKET_COSTS },
+    };
+    this.phase = "supermarket";
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `${this.playerName(playerId)} entered the supermarket at ${this.squareName(square)}.` });
+    return true;
+  }
+
+  randomEmptyBoardSquare() {
+    const empty = [];
+    for (let i = 0; i < 64; i++) {
+      if (!this.state.board[i] && !this.missingSquares.has(i) && !this.hazards.deadly.has(i) && !this.hazards.lava.has(i) && !this.hazards.asteroid.has(i)) {
+        empty.push(i);
+      }
+    }
+    return empty.length ? empty[Math.floor(Math.random() * empty.length)] : null;
+  }
+
+  submitSupermarketPurchase(playerId, items) {
+    if (this.phase !== "supermarket" || !this.supermarket) return { ok: false, error: "No supermarket is open" };
+    if (this.supermarket.playerId !== playerId) return { ok: false, error: "Waiting for the other player to shop" };
+
+    const raw = items && typeof items === "object" ? items : {};
+    const counts = {};
+    let total = 0;
+    for (const type of Object.keys(SUPERMARKET_COSTS)) {
+      const count = Math.max(0, Math.min(10, Math.floor(Number(raw[type]) || 0)));
+      counts[type] = count;
+      total += count * SUPERMARKET_COSTS[type];
+    }
+    if (total > SUPERMARKET_BUDGET) return { ok: false, error: "That costs too many coins" };
+
+    const dropped = [];
+    for (const type of ["q", "r", "b", "n", "p"]) {
+      for (let i = 0; i < counts[type]; i++) {
+        const sq = this.randomEmptyBoardSquare();
+        if (sq == null) break;
+        this.state.board[sq] = { type, color: this.supermarket.color, moved: true, tags: ["supplyCrate"] };
+        dropped.push({ sq, type, color: this.supermarket.color });
+        this.applyHazardsAfterMove(sq);
+      }
+    }
+
+    if (dropped.length) {
+      this.effects.push({ type: "supplyDrop", id: this.nextEffectId(), drops: dropped });
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: `Supply crate delivered ${dropped.length} piece(s).` });
+    } else {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Supermarket checkout complete, but no empty delivery square was available." });
+    }
+
+    this.supermarket = null;
+    this.phase = "play";
+    this.evaluateGameEnd();
+    if (this.phase === "play") this.maybeStartRuleChoice();
+    return { ok: true };
+  }
+
   currentModifiers() {
     const mods = this.ruleManager.computeModifiers();
     if (this.colourBlindPlies > 0) mods.friendlyFire = true;
@@ -518,11 +622,12 @@ class Game {
 
       this.bonusRuleChoice.remainingPicks -= 1;
       if (this.bonusRuleChoice.remainingPicks > 0) {
-        if (this.phase !== "bonusRuleChoice") {
+        if (this.phase !== "bonusRuleChoice" || this.pendingTargetRules.length > 0) {
           // A mini-game / interrupting phase took over; resume bonus picks once we're back to play.
           this.ruleChoicesByPlayerId = {};
           this.ruleChosenByPlayerId = {};
           this.ruleChoiceDeadlineMs = null;
+          if (this.phase === "bonusRuleChoice") this.resumePendingRuleWorkOrPlay();
           return { ok: true };
         }
         // Refresh choices (exclude Pot of Greed to avoid infinite loops).
@@ -539,8 +644,7 @@ class Game {
       this.ruleChosenByPlayerId = {};
       this.ruleChoiceDeadlineMs = null;
       if (this.phase === "bonusRuleChoice") {
-        this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
-        if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+        this.resumePendingRuleWorkOrPlay();
       }
       this.evaluateGameEnd();
       return { ok: true };
@@ -575,15 +679,18 @@ class Game {
       if (pick.ruleId) this.ruleManager.addRule(pick.ruleId, { playerId: pick.player.id, color: pick.player.color });
     }
 
-    if (this.phase === beforePhase) {
-      this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
-    }
-    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+    if (this.phase === beforePhase || this.phase === "bonusRuleChoice") this.resumePendingRuleWorkOrPlay();
     this.evaluateGameEnd();
   }
 
   resumeBonusRuleChoiceIfNeeded() {
-    if (!this.bonusRuleChoice || this.bonusRuleChoice.remainingPicks <= 0) return false;
+    while ((!this.bonusRuleChoice || this.bonusRuleChoice.remainingPicks <= 0) && this.bonusRuleChoices.length > 0) {
+      this.bonusRuleChoice = this.bonusRuleChoices.shift();
+    }
+    if (!this.bonusRuleChoice || this.bonusRuleChoice.remainingPicks <= 0) {
+      this.bonusRuleChoice = null;
+      return false;
+    }
     const pid = this.bonusRuleChoice.playerId;
     if (!pid) return false;
     this.phase = "bonusRuleChoice";
@@ -599,14 +706,21 @@ class Game {
     if (!this.started || this.result) return { ok: false, error: "Game not active" };
     if (!playerId) return { ok: false, error: "Bad player" };
 
-    if (!this.bonusRuleChoice || this.bonusRuleChoice.playerId !== playerId) {
-      this.bonusRuleChoice = { playerId, remainingPicks: Math.max(1, Number(extraPicks) || 0) };
+    const picks = Math.max(1, Number(extraPicks) || 0);
+    let target = null;
+    if (this.bonusRuleChoice?.playerId === playerId) {
+      target = this.bonusRuleChoice;
     } else {
-      this.bonusRuleChoice.remainingPicks += Math.max(1, Number(extraPicks) || 0);
+      target = this.bonusRuleChoices.find((choice) => choice.playerId === playerId) || null;
     }
+    if (!target) {
+      target = { playerId, remainingPicks: 0 };
+      this.bonusRuleChoices.push(target);
+    }
+    target.remainingPicks += picks;
 
-    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Pot of Greed! Pick ${this.bonusRuleChoice.remainingPicks} extra rule(s).` });
-    this.resumeBonusRuleChoiceIfNeeded();
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Pot of Greed! ${this.playerName(playerId)} will pick ${target.remainingPicks} extra rule(s).` });
+    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
     return { ok: true };
   }
 
@@ -643,7 +757,8 @@ class Game {
   enforceBonusRuleChoiceTimeoutIfNeeded() {
     if (this.phase !== "bonusRuleChoice") return;
     if (!this.bonusRuleChoice || this.bonusRuleChoice.remainingPicks <= 0) {
-      this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+      this.bonusRuleChoice = null;
+      this.resumePendingRuleWorkOrPlay();
       return;
     }
     if (this.ruleChoiceDeadlineMs == null) return;
@@ -659,12 +774,11 @@ class Game {
     }
 
     // Nothing to pick; end bonus choice.
-    this.bonusRuleChoice.remainingPicks = 0;
     this.bonusRuleChoice = null;
     this.ruleChoicesByPlayerId = {};
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = null;
-    this.phase = this.pendingTargetRules.length ? "targetRule" : "play";
+    this.resumePendingRuleWorkOrPlay();
   }
 
   enforceMiniGameTimeoutIfNeeded() {
@@ -759,9 +873,8 @@ class Game {
     });
 
     this.rps = null;
-    this.phase = "play";
     this.evaluateGameEnd();
-    if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+    this.resumePendingRuleWorkOrPlay();
   }
 
   enforceWagerTimeoutIfNeeded() {
@@ -781,9 +894,8 @@ class Game {
     if (this.wager.stage === "result") {
       if (this.wager.closeAtMs != null && now >= this.wager.closeAtMs) {
         this.wager = null;
-        this.phase = "play";
         this.evaluateGameEnd();
-        if (this.phase === "play") this.resumeBonusRuleChoiceIfNeeded();
+        this.resumePendingRuleWorkOrPlay();
       }
     }
   }
@@ -995,11 +1107,14 @@ class Game {
   }
 
   applyHazardsAfterMove(toSquare) {
+    if (toSquare == null || toSquare < 0 || toSquare > 63) return false;
+    let changed = false;
     if (this.hazards.deadly.has(toSquare) || this.hazards.lava.has(toSquare)) {
       const p = this.state.board[toSquare];
       if (p && p.color !== "x") {
         this.state.board[toSquare] = null;
         this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "hazard" });
+        changed = true;
       }
     }
     // Asteroid debris: destroy piece that lands on it, then remove the debris.
@@ -1008,9 +1123,20 @@ class Game {
       if (p && p.color !== "x") {
         this.state.board[toSquare] = null;
         this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "asteroid" });
+        changed = true;
       }
       this.hazards.asteroid.delete(toSquare);
     }
+    return changed;
+  }
+
+  applyHazardsToAllPieces() {
+    let changed = false;
+    for (let sq = 0; sq < 64; sq++) {
+      if (!this.state.board[sq] || this.state.board[sq]?.color === "x") continue;
+      if (this.applyHazardsAfterMove(sq)) changed = true;
+    }
+    return changed;
   }
 
   noteCaptureSquare(square) {
@@ -1086,6 +1212,7 @@ class Game {
       }
     }
     this.state.board = next;
+    this.applyHazardsToAllPieces();
   }
 
   refreshVanishingTiles() {
@@ -1139,6 +1266,7 @@ class Game {
 
     this.state.board[mirrorTo] = { ...piece, moved: true };
     this.state.board[mirrorFrom] = null;
+    this.applyHazardsAfterMove(mirrorTo);
   }
 
   // Teleporter corners: if a piece just landed on a corner, send it somewhere random.
@@ -1165,6 +1293,7 @@ class Game {
       piece: serializeBoard([p])[0],
     });
     this.effects.push({ type: "log", id: this.nextEffectId(), text: `Teleporter! Piece zapped from corner to ${String.fromCharCode(97 + idxToFile(dest))}${idxToRank(dest) + 1}.` });
+    this.applyHazardsAfterMove(dest);
     return dest;
   }
 
@@ -1310,42 +1439,74 @@ class Game {
     const fan = this.fans.find((f) => f.rank === idxToRank(sq));
     if (!fan) return sq;
 
-    let cur = sq;
-    while (true) {
-      const nf = idxToFile(cur) + fan.dir;
-      const rank = idxToRank(cur);
-      if (nf < 0 || nf > 7) break;
-      const next = toIdx(nf, rank);
-      if (this.missingSquares.has(next) || this.state.board[next]) break;
-      this.state.board[next] = this.state.board[cur];
-      this.state.board[cur] = null;
-      cur = next;
+    this.applyFanRow(fan);
+    for (let i = 0; i < 64; i++) {
+      if (this.state.board[i] === piece) return i;
     }
-    if (cur !== sq) {
-      this.effects.push({
-        type: "move",
-        style: "fan",
-        id: this.nextEffectId(),
-        from: sq,
-        to: cur,
-        piece: this.state.board[cur] ? serializeBoard([this.state.board[cur]])[0] : null,
-      });
-      this.effects.push({ type: "log", id: this.nextEffectId(), text: `Fan blew a piece from ${this.squareName(sq)} to ${this.squareName(cur)}.` });
-    }
-    return cur;
+    return sq;
   }
 
   applyFanRow(fan) {
     if (!fan || typeof fan.rank !== "number" || (fan.dir !== 1 && fan.dir !== -1)) return;
-    const files = fan.dir > 0 ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
-    for (const file of files) {
-      const sq = toIdx(file, fan.rank);
-      const p = this.state.board[sq];
-      if (!p || p.color === "x" || this.isTitan(p)) continue;
-      const finalSq = this.applyFansToSquare(sq);
-      if (finalSq !== sq) {
-        this.applyHazardsAfterMove(finalSq);
-        this.applySuicideBomberIfNeeded(finalSq);
+    let changed = true;
+    let guard = 0;
+    while (changed && guard++ < 8) {
+      changed = false;
+      const segments = [];
+      let cur = [];
+      for (let file = 0; file < 8; file++) {
+        const sq = toIdx(file, fan.rank);
+        const occupant = this.state.board[sq];
+        const blocksFan = this.missingSquares.has(sq) || occupant?.color === "x" || this.isTitan(occupant);
+        if (blocksFan) {
+          if (cur.length) segments.push(cur);
+          cur = [];
+        } else {
+          cur.push(sq);
+        }
+      }
+      if (cur.length) segments.push(cur);
+
+      const movedTo = [];
+      for (const segment of segments) {
+        const pieces = segment
+          .map((sq) => ({ sq, p: this.state.board[sq] }))
+          .filter(({ p }) => p && p.color !== "x" && !this.isTitan(p));
+        if (!pieces.length) continue;
+
+        const targets = fan.dir > 0 ? segment.slice(-pieces.length) : segment.slice(0, pieces.length);
+        if (fan.dir > 0) pieces.sort((a, b) => idxToFile(a.sq) - idxToFile(b.sq));
+        else pieces.sort((a, b) => idxToFile(a.sq) - idxToFile(b.sq));
+
+        for (const sq of segment) {
+          const p = this.state.board[sq];
+          if (p && p.color !== "x" && !this.isTitan(p)) this.state.board[sq] = null;
+        }
+
+        for (let i = 0; i < pieces.length; i++) {
+          const from = pieces[i].sq;
+          const to = targets[i];
+          this.state.board[to] = pieces[i].p;
+          if (from !== to) {
+            changed = true;
+            movedTo.push(to);
+            this.effects.push({
+              type: "move",
+              style: "fan",
+              id: this.nextEffectId(),
+              from,
+              to,
+              piece: serializeBoard([pieces[i].p])[0],
+            });
+            this.effects.push({ type: "log", id: this.nextEffectId(), text: `Fan blew a piece from ${this.squareName(from)} to ${this.squareName(to)}.` });
+          }
+        }
+      }
+
+      for (const sq of movedTo) {
+        const hazardChanged = this.applyHazardsAfterMove(sq);
+        const bombChanged = this.applySuicideBomberIfNeeded(sq);
+        if (hazardChanged || bombChanged) changed = true;
       }
     }
   }
@@ -1490,6 +1651,7 @@ class Game {
       if (this.missingSquares.has(sq)) continue;
       if (this.state.board[sq]?.type === "k") continue;
       this.state.board[sq] = clonePiece(movedPiece);
+      this.applyHazardsAfterMove(sq);
     }
   }
 
@@ -1527,10 +1689,14 @@ class Game {
       this.applyHazardsAfterMove(finalTo);
       this.applySuicideBomberIfNeeded(finalTo);
 
+      const sourceFan = this.fans.find((f) => f.rank === idxToRank(from));
+      if (sourceFan && idxToRank(finalTo) !== idxToRank(from)) this.applyFanRow(sourceFan);
+
       if (mods.kingOfHill) this.applyKingOfHill();
       if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
       if (mods.randomShift) this.applyRandomShift();
       if (mods.vanishingTiles) this.refreshVanishingTiles();
+      this.applyHazardsToAllPieces();
       this.clearStickyLocks(color);
       this.applyStickyLanding(finalTo);
       if (mods.moveTwice) this.extraMoves[color] += 1;
@@ -1557,7 +1723,7 @@ class Game {
 
       this.ruleManager.tickAfterPly();
       this.evaluateGameEnd();
-      this.maybeStartRuleChoice();
+      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo)) this.maybeStartRuleChoice();
       return { ok: true };
     }
 
@@ -1655,7 +1821,7 @@ class Game {
       const homeRank = color === "w" ? 1 : 6;
       for (let f = 0; f < 8; f++) {
         const sq = toIdx(f, homeRank);
-        if (!this.state.board[sq] && !this.missingSquares.has(sq) && !this.hazards.deadly.has(sq)) {
+        if (!this.state.board[sq] && !this.missingSquares.has(sq) && !this.hazards.deadly.has(sq) && !this.hazards.lava.has(sq) && !this.hazards.asteroid.has(sq)) {
           this.state.board[sq] = { type: "p", color, moved: true, tags: ["respawned"] };
           break;
         }
@@ -1680,6 +1846,9 @@ class Game {
     // Suicide bomber detonates after its final landing square is known.
     this.applySuicideBomberIfNeeded(finalTo);
 
+    const sourceFan = this.fans.find((f) => f.rank === idxToRank(from));
+    if (sourceFan && idxToRank(finalTo) !== idxToRank(from)) this.applyFanRow(sourceFan);
+
     if (capture) this.noteCaptureSquare(captureSquare);
 
     // King of the Hill: promote pieces on central squares.
@@ -1689,6 +1858,7 @@ class Game {
     if (mods.gravity || this.permanent.gravity) this.applyGravityStep();
     if (mods.randomShift) this.applyRandomShift();
     if (mods.vanishingTiles) this.refreshVanishingTiles();
+    this.applyHazardsToAllPieces();
 
     this.clearStickyLocks(color);
     this.applyStickyLanding(finalTo);
@@ -1733,7 +1903,7 @@ class Game {
       this.pendingPawnSoldierShot = { playerId, color, from: finalTo };
       this.phase = "pawnSoldierShot";
     } else {
-      this.maybeStartRuleChoice();
+      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo)) this.maybeStartRuleChoice();
     }
     return { ok: true };
   }
@@ -1830,6 +2000,17 @@ class Game {
             playerId: this.pendingPawnSoldierShot.playerId,
             color: this.pendingPawnSoldierShot.color,
             from: this.pendingPawnSoldierShot.from,
+          }
+        : null,
+      supermarkets: this.supermarkets.map((market) => ({ square: market.square, instanceId: market.instanceId })),
+      supermarket: this.supermarket
+        ? {
+            active: true,
+            playerId: this.supermarket.playerId,
+            color: this.supermarket.color,
+            square: this.supermarket.square,
+            budget: this.supermarket.budget,
+            costs: { ...this.supermarket.costs },
           }
         : null,
       rps: this.rps

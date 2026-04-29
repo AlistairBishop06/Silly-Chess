@@ -60,6 +60,11 @@ const els = {
   coinAssign: document.getElementById("coinAssign"),
   coinSpin: document.getElementById("coinSpin"),
   wagerResult: document.getElementById("wagerResult"),
+  supermarketModal: document.getElementById("supermarketModal"),
+  supermarketBudget: document.getElementById("supermarketBudget"),
+  supermarketStatus: document.getElementById("supermarketStatus"),
+  supermarketItems: document.getElementById("supermarketItems"),
+  supermarketCheckoutBtn: document.getElementById("supermarketCheckoutBtn"),
   log: document.getElementById("log"),
   gameMsg: document.getElementById("gameMsg"),
 };
@@ -77,6 +82,7 @@ const state = {
   flipVisual: false,
   particles: [],
   animations: [],
+  supplyDrops: [],
   lawnmowers: [],
   bullets: [],
   lastEffectsSeen: new Set(),
@@ -87,6 +93,8 @@ const state = {
   pendingTargetKey: null,
   cachedRulebook: null,
   openServers: [],
+  supermarketItems: { p: 0, n: 0, b: 0, r: 0, q: 0 },
+  supermarketKey: null,
 };
 
 const confetti = {
@@ -198,6 +206,7 @@ function resetToLobby(reason) {
   state.lastRematchId = null;
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
+  state.supplyDrops = [];
   stopConfetti();
   saveSession();
   syncUI();
@@ -215,6 +224,7 @@ function enterLobby({ code, playerId, color }) {
   state.lastRematchId = null;
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
+  state.supplyDrops = [];
   stopConfetti();
   if (els.resultModal) els.resultModal.hidden = true;
   saveSession();
@@ -631,6 +641,7 @@ function drawBoardEffects(s, t) {
   for (const sq of s.ghostSquares || []) drawGhostTile(sq, t);
   for (const sq of s.stickySquares || []) drawStickyTile(sq, t);
   for (const sq of s.hazards?.asteroid || []) drawAsteroidTile(sq, t);
+  for (const market of s.supermarkets || []) drawSupermarketTile(market.square, t);
   for (const fan of s.fans || []) drawFanVisual(fan, t);
 }
 
@@ -661,6 +672,128 @@ function drawHazardGlyphs(s, t) {
       ctx.stroke();
       ctx.fillRect(x - size * 0.32, y - size * 0.32, size * 0.64, size * 0.64);
     });
+  }
+}
+
+function drawSupermarketTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    ctx.save();
+    const pulse = 0.5 + 0.5 * Math.sin(t / 260 + sq);
+
+    ctx.fillStyle = `rgba(156, 255, 107, ${0.11 + pulse * 0.05})`;
+    ctx.beginPath();
+    ctx.arc(x, y, size * (0.45 + pulse * 0.025), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(19, 28, 45, 0.92)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+    ctx.lineWidth = Math.max(2, size * 0.025);
+    ctx.beginPath();
+    ctx.roundRect(x - size * 0.34, y - size * 0.16, size * 0.68, size * 0.36, size * 0.045);
+    ctx.fill();
+    ctx.stroke();
+
+    const awningY = y - size * 0.31;
+    const stripeW = size * 0.12;
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = i % 2 === 0 ? "#ff4f8b" : "#fff7e8";
+      ctx.beginPath();
+      ctx.roundRect(x - size * 0.36 + i * stripeW, awningY, stripeW + 1, size * 0.15, size * 0.018);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(17, 24, 39, 0.45)";
+    ctx.strokeRect(x - size * 0.36, awningY, size * 0.72, size * 0.15);
+
+    ctx.fillStyle = "rgba(123, 211, 255, 0.42)";
+    ctx.fillRect(x - size * 0.25, y - size * 0.07, size * 0.18, size * 0.14);
+    ctx.fillRect(x + size * 0.07, y - size * 0.07, size * 0.18, size * 0.14);
+    ctx.fillStyle = "rgba(255, 209, 102, 0.9)";
+    ctx.fillRect(x - size * 0.055, y + size * 0.005, size * 0.11, size * 0.19);
+
+    ctx.fillStyle = "rgba(16, 24, 39, 0.92)";
+    ctx.font = `${Math.floor(size * 0.13)}px system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("SHOP", x, y - size * 0.235);
+
+    ctx.strokeStyle = `rgba(156, 255, 107, ${0.42 + pulse * 0.20})`;
+    ctx.lineWidth = Math.max(2, size * 0.018);
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.43, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function renderSupermarket() {
+  const s = state.serverState;
+  const shop = s?.supermarket;
+  const active = !!shop?.active && s?.phase === "supermarket";
+  if (!els.supermarketModal) return;
+  els.supermarketModal.hidden = !active;
+  if (!active) {
+    state.supermarketKey = null;
+    state.supermarketItems = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+    return;
+  }
+
+  const key = `${shop.playerId}|${shop.square}|${shop.budget}`;
+  if (state.supermarketKey !== key) {
+    state.supermarketKey = key;
+    state.supermarketItems = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+  }
+
+  const costs = shop.costs || { p: 1, n: 3, b: 3, r: 5, q: 9 };
+  const total = Object.entries(state.supermarketItems).reduce((sum, [type, count]) => sum + (costs[type] || 0) * count, 0);
+  const remaining = Math.max(0, (shop.budget || 10) - total);
+  const yourShop = shop.playerId === state.playerId;
+  if (els.supermarketBudget) els.supermarketBudget.textContent = `${remaining} coins`;
+  if (els.supermarketStatus) {
+    els.supermarketStatus.textContent = yourShop
+      ? `Choose pieces for delivery. Spent ${total}/${shop.budget || 10} coins.`
+      : "Opponent is shopping.";
+  }
+
+  const labels = [
+    ["q", "Queen"],
+    ["r", "Rook"],
+    ["b", "Bishop"],
+    ["n", "Knight"],
+    ["p", "Pawn"],
+  ];
+  if (els.supermarketItems) {
+    els.supermarketItems.innerHTML = "";
+    for (const [type, label] of labels) {
+      const row = document.createElement("div");
+      row.className = "shopItem";
+      const glyph = PIECE_GLYPH_MONO[type] || type.toUpperCase();
+      const count = state.supermarketItems[type] || 0;
+      const cost = costs[type] || 0;
+      row.innerHTML = `
+        <div class="shopGlyph">${glyph}</div>
+        <div class="shopMeta"><strong>${label}</strong><span>${cost} coin${cost === 1 ? "" : "s"}</span></div>
+        <div class="shopStepper">
+          <button type="button" data-delta="-1">-</button>
+          <span>${count}</span>
+          <button type="button" data-delta="1">+</button>
+        </div>
+      `;
+      for (const btn of row.querySelectorAll("button")) {
+        btn.disabled = !yourShop || (Number(btn.dataset.delta) > 0 && remaining < cost);
+        btn.addEventListener("click", () => {
+          const delta = Number(btn.dataset.delta);
+          const next = Math.max(0, (state.supermarketItems[type] || 0) + delta);
+          state.supermarketItems[type] = next;
+          renderSupermarket();
+        });
+      }
+      els.supermarketItems.appendChild(row);
+    }
+  }
+
+  if (els.supermarketCheckoutBtn) {
+    els.supermarketCheckoutBtn.disabled = !yourShop;
+    els.supermarketCheckoutBtn.textContent = yourShop ? "Checkout" : "Waiting...";
   }
 }
 
@@ -744,6 +877,7 @@ function draw() {
   for (const { sq, p } of titans) drawTitanPiece(sq, p);
   drawLawnmowers(t);
   drawAnimations(t);
+  drawSupplyDrops(t);
   drawBullets(t);
 
   // Particles.
@@ -793,6 +927,10 @@ function draw() {
         ? s.pendingPawnSoldierShot?.playerId === state.playerId
           ? "Click a square to fire"
           : "Opponent firing"
+      : s.phase === "supermarket"
+        ? s.supermarket?.playerId === state.playerId
+          ? "Supermarket"
+          : "Opponent shopping"
       : s.phase === "rps"
         ? "RPS Duel!"
       : s.phase === "wager"
@@ -809,6 +947,9 @@ function animationHiddenSquares(t) {
   const hidden = new Set();
   for (const anim of state.animations) {
     if (t <= anim.end && anim.to != null) hidden.add(anim.to);
+  }
+  for (const drop of state.supplyDrops) {
+    if (t <= drop.end && drop.sq != null) hidden.add(drop.sq);
   }
   return hidden;
 }
@@ -873,6 +1014,98 @@ function drawAnimations(t) {
     if (p < 1) next.push(anim);
   }
   state.animations = next;
+}
+
+function queueSupplyDrop(effect) {
+  const now = nowMs();
+  const drops = Array.isArray(effect.drops) ? effect.drops : [];
+  drops.forEach((drop, index) => {
+    if (drop?.sq == null || !drop.type || !drop.color) return;
+    state.supplyDrops.push({
+      sq: drop.sq,
+      piece: { type: drop.type, color: drop.color, moved: true },
+      start: now + index * 180,
+      end: now + index * 180 + 1250,
+    });
+  });
+}
+
+function drawSupplyDrops(t) {
+  const next = [];
+  const tile = els.canvas.width / 8;
+  for (const drop of state.supplyDrops) {
+    if (t < drop.start) {
+      next.push(drop);
+      continue;
+    }
+    const p = Math.min(1, Math.max(0, (t - drop.start) / Math.max(1, drop.end - drop.start)));
+    const eased = 1 - Math.pow(1 - p, 3);
+    const target = squareToCanvasCenter(drop.sq);
+    const sway = Math.sin(t / 180 + drop.sq) * tile * 0.045 * (1 - p);
+    const x = target.x + sway;
+    const y = target.y - tile * 1.35 * (1 - eased);
+    const balloonY = y - tile * 0.48;
+    const crateY = y + tile * 0.08;
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, p * 4);
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = Math.max(1.5, tile * 0.018);
+    ctx.beginPath();
+    ctx.moveTo(x - tile * 0.1, balloonY + tile * 0.18);
+    ctx.lineTo(x - tile * 0.16, crateY - tile * 0.15);
+    ctx.moveTo(x + tile * 0.1, balloonY + tile * 0.18);
+    ctx.lineTo(x + tile * 0.16, crateY - tile * 0.15);
+    ctx.stroke();
+
+    const balloonGrad = ctx.createRadialGradient(x - tile * 0.08, balloonY - tile * 0.08, tile * 0.03, x, balloonY, tile * 0.28);
+    balloonGrad.addColorStop(0, "#fff7e8");
+    balloonGrad.addColorStop(0.42, "#ff8fb1");
+    balloonGrad.addColorStop(1, "#ff4f8b");
+    ctx.fillStyle = balloonGrad;
+    ctx.strokeStyle = "rgba(17,24,39,0.38)";
+    ctx.beginPath();
+    ctx.ellipse(x, balloonY, tile * 0.24, tile * 0.31, Math.sin(t / 360) * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ff4f8b";
+    ctx.beginPath();
+    ctx.moveTo(x - tile * 0.045, balloonY + tile * 0.27);
+    ctx.lineTo(x + tile * 0.045, balloonY + tile * 0.27);
+    ctx.lineTo(x, balloonY + tile * 0.34);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#b8793b";
+    ctx.strokeStyle = "rgba(17,24,39,0.5)";
+    ctx.lineWidth = Math.max(2, tile * 0.025);
+    ctx.beginPath();
+    ctx.roundRect(x - tile * 0.24, crateY - tile * 0.16, tile * 0.48, tile * 0.32, tile * 0.035);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,247,232,0.35)";
+    ctx.beginPath();
+    ctx.moveTo(x - tile * 0.22, crateY);
+    ctx.lineTo(x + tile * 0.22, crateY);
+    ctx.moveTo(x, crateY - tile * 0.15);
+    ctx.lineTo(x, crateY + tile * 0.15);
+    ctx.stroke();
+
+    drawPieceAt(x, crateY + tile * 0.03, drop.piece);
+
+    if (p > 0.88) {
+      ctx.globalAlpha = (p - 0.88) / 0.12;
+      ctx.strokeStyle = "rgba(255,209,102,0.8)";
+      ctx.lineWidth = Math.max(2, tile * 0.03);
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, tile * (0.22 + (p - 0.88) * 1.8), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    if (p < 1) next.push(drop);
+  }
+  state.supplyDrops = next;
 }
 
 function queueBullets(effect) {
@@ -1157,6 +1390,7 @@ function ruleArtIcon(ruleId, ruleName) {
   if (hay.includes("plague")) return "\u2623";
   if (hay.includes("lawnmower")) return "\u25AC";
   if (hay.includes("backup")) return "\u2665";
+  if (hay.includes("supermarket") || hay.includes("shop")) return "\u{1F6D2}";
   if (hay.includes("sticky")) return "\u25CD";
   if (hay.includes("haunted")) return "\u25D6";
   if (hay.includes("friendly fire")) return "\u26A0";
@@ -1672,6 +1906,7 @@ function syncUI() {
     document.body.classList.remove("is-debug-choice");
     els.choiceCards.classList.remove("debugChoice");
     if (els.resultModal) els.resultModal.hidden = true;
+    if (els.supermarketModal) els.supermarketModal.hidden = true;
     stopConfetti();
     if (els.sideLabelTop) els.sideLabelTop.textContent = "";
     if (els.sideLabelBottom) els.sideLabelBottom.textContent = "";
@@ -1692,6 +1927,9 @@ function syncUI() {
       s.pendingTargetRule.playerId === state.playerId
         ? s.pendingTargetRule.prompt || "Choose a rule target"
         : "Opponent choosing a rule target";
+  }
+  if (s.supermarket?.active) {
+    els.gameMsg.textContent = s.supermarket.playerId === state.playerId ? "Choose your supermarket delivery" : "Opponent is shopping";
   }
   if (s.phase === "pawnSoldierShot") {
     els.gameMsg.textContent =
@@ -1714,6 +1952,7 @@ function syncUI() {
   renderChoice();
   renderRps();
   renderWager();
+  renderSupermarket();
 
   // Result modal.
   const ri = s.resultInfo;
@@ -1771,6 +2010,11 @@ function handleEffects() {
       queueLawnmower(e);
       spawnParticles(e.squares || [], "rgba(156,255,107,0.78)");
     }
+    if (e.type === "supplyDrop") {
+      queueSupplyDrop(e);
+      spawnParticles((e.drops || []).map((drop) => drop.sq).filter((sq) => sq != null), "rgba(255,209,102,0.88)");
+      playSound("rule");
+    }
     if (e.type === "rule") {
       playSound("rule");
       logLine(`<strong>Rule</strong>: ${escapeHtml(e.text)}`);
@@ -1827,6 +2071,7 @@ socket.on("game:state", (s) => {
   if (state.lastRematchId != null && s.rematchId != null && s.rematchId !== state.lastRematchId) {
     state.lastEffectsSeen = new Set();
     state.lastChoiceKey = null;
+    state.supplyDrops = [];
     stopConfetti();
   }
   state.lastRematchId = s.rematchId ?? state.lastRematchId;
@@ -1913,6 +2158,14 @@ els.wagerConfirmBtn?.addEventListener("click", () => {
   if (!state.lobby || !state.playerId) return;
   socket.emit("game:wagerConfirm", { code: state.lobby, playerId: state.playerId }, (res) => {
     if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "wager confirm failed")}`);
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+});
+
+els.supermarketCheckoutBtn?.addEventListener("click", () => {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:supermarketPurchase", { code: state.lobby, playerId: state.playerId, items: state.supermarketItems }, (res) => {
+    if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "checkout failed")}`);
     socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
   });
 });

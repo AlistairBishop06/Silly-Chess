@@ -116,7 +116,7 @@ class RuleManager {
       inst.remaining = r.durationTurns;
       this.active.push(inst);
       this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} (active)` });
-      r.apply?.(this.game, { flags: {} });
+      r.apply?.(this.game, { flags: {}, inst });
       return { ok: true, applied: "duration" };
     }
 
@@ -154,7 +154,7 @@ class RuleManager {
         inst.remaining -= 1;
         if (inst.remaining <= 0) {
           this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} ends.` });
-          this.game.onRuleEnded?.(inst.ruleId);
+          this.game.onRuleEnded?.(inst.ruleId, inst);
           continue;
         }
         still.push(inst);
