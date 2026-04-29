@@ -1953,6 +1953,11 @@ class Game {
     const pendingTarget = this.currentPendingTarget();
     const requestingColor = this.players.find((p) => p.id === playerId)?.color || null;
     const backupVitalSquare = requestingColor ? this.findBackupVitalSquare(requestingColor) : null;
+    const adAttack =
+      !!requestingColor &&
+      this.ruleManager.active.some(
+        (inst) => inst.ruleId === "dur_ads_7" && inst.kind === "duration" && inst.data?.targetColor === requestingColor
+      );
 
     return {
       roomCode: this.roomCode,
@@ -1981,6 +1986,7 @@ class Game {
       backupVitalSquare,
       visualFlip: this.visualFlipPlies > 0,
       colourBlind: this.colourBlindPlies > 0,
+      adAttack,
       lastMoveSquares: this.lastMoveSquares,
       invisiblePieces: !!mods.invisiblePieces,
       visibleSquares: visibleSquares ? [...visibleSquares] : null,

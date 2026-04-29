@@ -65,6 +65,7 @@ const els = {
   supermarketStatus: document.getElementById("supermarketStatus"),
   supermarketItems: document.getElementById("supermarketItems"),
   supermarketCheckoutBtn: document.getElementById("supermarketCheckoutBtn"),
+  adsLayer: document.getElementById("adsLayer"),
   log: document.getElementById("log"),
   gameMsg: document.getElementById("gameMsg"),
 };
@@ -95,6 +96,8 @@ const state = {
   openServers: [],
   supermarketItems: { p: 0, n: 0, b: 0, r: 0, q: 0 },
   supermarketKey: null,
+  ads: [],
+  nextAdAt: 0,
 };
 
 const confetti = {
@@ -207,6 +210,7 @@ function resetToLobby(reason) {
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
   state.supplyDrops = [];
+  clearAds();
   stopConfetti();
   saveSession();
   syncUI();
@@ -225,6 +229,7 @@ function enterLobby({ code, playerId, color }) {
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
   state.supplyDrops = [];
+  clearAds();
   stopConfetti();
   if (els.resultModal) els.resultModal.hidden = true;
   saveSession();
@@ -794,6 +799,80 @@ function renderSupermarket() {
   if (els.supermarketCheckoutBtn) {
     els.supermarketCheckoutBtn.disabled = !yourShop;
     els.supermarketCheckoutBtn.textContent = yourShop ? "Checkout" : "Waiting...";
+  }
+}
+
+const AD_VARIANTS = [
+  { title: "FREE QUEEN", copy: "Click now to claim unstoppable material advantage!", cta: "Claim", size: "sm", tone: "pink" },
+  { title: "Your king is exposed", copy: "Install ShieldMate Pro before it is too late.", cta: "Protect", size: "md", tone: "blue" },
+  { title: "Hot pawns nearby", copy: "Meet promoted pawns in your area this turn.", cta: "View", size: "sm", tone: "gold" },
+  { title: "Limited rook sale", copy: "Buy one file, dominate every rank. Today only.", cta: "Shop", size: "lg", tone: "green" },
+  { title: "You won a castle", copy: "Verify your lobby code to unlock prize castling.", cta: "Verify", size: "md", tone: "purple" },
+  { title: "Board cleaner", copy: "Remove lava, ghosts, fans, and consequences instantly.", cta: "Download", size: "lg", tone: "red" },
+];
+
+function clearAds() {
+  state.ads = [];
+  state.nextAdAt = 0;
+  if (els.adsLayer) els.adsLayer.innerHTML = "";
+}
+
+function spawnAd() {
+  if (!els.adsLayer) return;
+  const variant = AD_VARIANTS[Math.floor(Math.random() * AD_VARIANTS.length)];
+  const id = `ad-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const ad = {
+    id,
+    ...variant,
+    x: Math.random() * 72,
+    y: Math.random() * 68,
+    rot: (Math.random() - 0.5) * 7,
+  };
+  state.ads.push(ad);
+  renderAds();
+}
+
+function renderAds() {
+  if (!els.adsLayer) return;
+  els.adsLayer.innerHTML = "";
+  for (const ad of state.ads) {
+    const div = document.createElement("div");
+    div.className = `fakeAd ${ad.size} ${ad.tone}`;
+    div.style.left = `${ad.x}%`;
+    div.style.top = `${ad.y}%`;
+    div.style.setProperty("--rot", `${ad.rot}deg`);
+    div.innerHTML = `
+      <button class="fakeAdClose" type="button" aria-label="Close ad">x</button>
+      <div class="fakeAdBadge">AD</div>
+      <div class="fakeAdArt" aria-hidden="true"></div>
+      <strong>${escapeHtml(ad.title)}</strong>
+      <span>${escapeHtml(ad.copy)}</span>
+      <button class="fakeAdCta" type="button">${escapeHtml(ad.cta)}</button>
+    `;
+    div.querySelector(".fakeAdClose")?.addEventListener("click", () => {
+      state.ads = state.ads.filter((item) => item.id !== ad.id);
+      renderAds();
+    });
+    div.querySelector(".fakeAdCta")?.addEventListener("click", () => {
+      state.ads = state.ads.filter((item) => item.id !== ad.id);
+      renderAds();
+    });
+    els.adsLayer.appendChild(div);
+  }
+}
+
+function tickAds() {
+  const active = !!state.serverState?.adAttack && !!state.lobby;
+  if (!active) {
+    if (state.ads.length || state.nextAdAt) clearAds();
+    return;
+  }
+  if (!els.adsLayer) return;
+  const now = Date.now();
+  if (!state.nextAdAt) state.nextAdAt = now;
+  if (now >= state.nextAdAt) {
+    spawnAd();
+    state.nextAdAt = now + 2000;
   }
 }
 
@@ -1388,6 +1467,7 @@ function ruleArtIcon(ruleId, ruleName) {
 
   if (hay.includes("black hole")) return "\u25CF";
   if (hay.includes("plague")) return "\u2623";
+  if (hay.includes("ads")) return "\u25A3";
   if (hay.includes("lawnmower")) return "\u25AC";
   if (hay.includes("backup")) return "\u2665";
   if (hay.includes("supermarket") || hay.includes("shop")) return "\u{1F6D2}";
@@ -2072,6 +2152,7 @@ socket.on("game:state", (s) => {
     state.lastEffectsSeen = new Set();
     state.lastChoiceKey = null;
     state.supplyDrops = [];
+    clearAds();
     stopConfetti();
   }
   state.lastRematchId = s.rematchId ?? state.lastRematchId;
@@ -2246,6 +2327,7 @@ setInterval(() => {
   updateChoiceTimer();
   updateRpsTimer();
   updateWagerTimer();
+  tickAds();
 }, 250);
 
 // Fallback sync: if we haven't seen a state update recently, request one.

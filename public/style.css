@@ -1382,6 +1382,113 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   justify-content: center;
 }
 
+.adsLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.fakeAd {
+  position: absolute;
+  width: 230px;
+  min-height: 150px;
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  background: #fff7e8;
+  color: #111827;
+  box-shadow: 0 22px 56px rgba(0, 0, 0, 0.46);
+  transform: rotate(var(--rot));
+  pointer-events: auto;
+  animation: fakeAdPop 180ms ease-out;
+}
+
+.fakeAd.sm {
+  width: 190px;
+  min-height: 128px;
+}
+
+.fakeAd.lg {
+  width: 290px;
+  min-height: 180px;
+}
+
+.fakeAd.pink { background: linear-gradient(135deg, #fff7e8, #ff8fb1); }
+.fakeAd.blue { background: linear-gradient(135deg, #f7fbff, #7bd3ff); }
+.fakeAd.gold { background: linear-gradient(135deg, #fff7e8, #ffd166); }
+.fakeAd.green { background: linear-gradient(135deg, #f6fff1, #9cff6b); }
+.fakeAd.purple { background: linear-gradient(135deg, #fff7e8, #caa6ff); }
+.fakeAd.red { background: linear-gradient(135deg, #fff7e8, #ff7a59); }
+
+.fakeAdClose {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  justify-content: center;
+  border-color: rgba(17, 24, 39, 0.24);
+  background: rgba(255, 255, 255, 0.74);
+  color: #111827;
+  font-weight: 950;
+}
+
+.fakeAdBadge {
+  width: max-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.86);
+  color: #fff7e8;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.fakeAdArt {
+  width: 54px;
+  height: 38px;
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(255, 255, 255, 0.95) 0 8px, transparent 9px),
+    repeating-linear-gradient(45deg, rgba(17, 24, 39, 0.18) 0 5px, transparent 5px 10px),
+    rgba(17, 24, 39, 0.12);
+}
+
+.fakeAd strong {
+  padding-right: 28px;
+  font-size: 17px;
+  line-height: 1.05;
+}
+
+.fakeAd span {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.fakeAdCta {
+  min-height: 30px;
+  padding: 6px 10px;
+  justify-content: center;
+  color: #fff7e8;
+  border-color: rgba(17, 24, 39, 0.2);
+  background: #111827;
+}
+
+@keyframes fakeAdPop {
+  from {
+    opacity: 0;
+    transform: scale(0.72) rotate(var(--rot));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(var(--rot));
+  }
+}
+
 .coinArea {
   margin-top: 10px;
   text-align: center;

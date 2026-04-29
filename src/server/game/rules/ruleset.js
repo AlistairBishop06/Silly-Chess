@@ -1112,6 +1112,23 @@ const RULES = [
 
   // 🟢 For X Turns (original 18 + 4 new)
   {
+    id: "dur_ads_7",
+    kind: "duration",
+    durationTurns: 7,
+    name: "Ads",
+    description: "For 7 turns, the opponent gets fake pop-up ads every 2 seconds. They stack until closed.",
+    apply(game, ctx) {
+      const color = ctx?.color;
+      const targetColor = color === "w" ? "b" : color === "b" ? "w" : null;
+      if (ctx?.inst?.data) ctx.inst.data.targetColor = targetColor;
+      game.effects.push({
+        type: "log",
+        id: game.nextEffectId(),
+        text: targetColor ? `Ads are attacking ${targetColor === "w" ? "White" : "Black"}'s screen.` : "Ads are attacking the opponent's screen.",
+      });
+    },
+  },
+  {
     id: "dur_supermarket_10",
     kind: "duration",
     durationTurns: 10,

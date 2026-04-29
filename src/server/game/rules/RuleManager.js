@@ -116,7 +116,7 @@ class RuleManager {
       inst.remaining = r.durationTurns;
       this.active.push(inst);
       this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} (active)` });
-      r.apply?.(this.game, { flags: {}, inst });
+      r.apply?.(this.game, { flags: {}, inst, ...ctx });
       return { ok: true, applied: "duration" };
     }
 
