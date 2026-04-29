@@ -19,8 +19,20 @@ const {
   pieceValue,
 } = require("./src/server/game/ChessEngine");
 
-// DEBUG MODE: set `true` to enable debug-only UI/behaviour (e.g. player named "DEBUG" sees all rules at rule choice).
-const DEBUG_MODE = true;
+function readBoolEnv(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const v = String(raw).trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(v)) return true;
+  if (["0", "false", "no", "n", "off"].includes(v)) return false;
+  return fallback;
+}
+
+// DEBUG MODE: enables debug-only UI/behaviour (e.g. player named "DEBUG" sees all rules at rule choice).
+const DEFAULT_DEBUG_MODE = readBoolEnv("DEBUG_MODE", true);
+const runtimeFlags = {
+  debugMode: DEFAULT_DEBUG_MODE,
+};
 
 const app = express();
 app.use(express.json({ limit: "32kb" }));
@@ -49,7 +61,7 @@ loadEnvFile(path.join(__dirname, "env"));
 const DATA_DIR = path.join(__dirname, "data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL || "";
-const USE_DATABASE = !!DATABASE_URL;
+const USE_DATABASE = !!DATABASE_URL && !readBoolEnv("DISABLE_DATABASE", false);
 const db = USE_DATABASE
   ? new Pool({
       connectionString: DATABASE_URL,
@@ -246,6 +258,13 @@ function usernameKey(username) {
   return normalizeUsername(username).toLowerCase();
 }
 
+const ADMIN_MIN_COIN_BALANCE = 1_000_000_000;
+
+function userById(userId) {
+  if (!userId) return null;
+  return Object.values(userStore.users || {}).find((u) => u?.id === userId) || null;
+}
+
 function defaultStats() {
   return {
     gamesStarted: 0,
@@ -301,10 +320,14 @@ function defaultProfile(username = "Player") {
 function hydrateUser(user) {
   if (!user) return null;
   if (!user.usernameKey) user.usernameKey = usernameKey(user.username);
+  user.isAdmin = !!user.isAdmin;
   user.stats = { ...defaultStats(), ...(user.stats || {}) };
   if (!user.stats.gamesPlayed && user.stats.gamesStarted) user.stats.gamesPlayed = user.stats.gamesStarted;
   if (!user.stats.rating) user.stats.rating = 1000;
   if (!user.stats.peakRating) user.stats.peakRating = user.stats.rating;
+  if (user.isAdmin) {
+    user.stats.coins = Math.max(Number(user.stats.coins || 0), ADMIN_MIN_COIN_BALANCE);
+  }
   user.profile = { ...defaultProfile(user.username), ...(user.profile || {}) };
   const avatarCatalog = new Set((COSMETIC_CATALOG.avatars || []).map((item) => item.name));
   if (!user.profile.customAvatar) {
@@ -487,7 +510,7 @@ function cosmeticInventory(user) {
       ...item,
       unlocked: ownsCosmetic(user, group, item.name),
       selected: selectedName === item.name,
-      affordable: (user.stats?.coins || 0) >= item.price,
+      affordable: user.isAdmin || (user.stats?.coins || 0) >= item.price,
     }));
     if (selectedName && !out[group].some((item) => item.name === selectedName)) {
       out[group].unshift({ name: selectedName, label: `Custom (${selectedName})`, price: 0, unlocked: true, selected: true, affordable: true });
@@ -555,6 +578,7 @@ function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
+    isAdmin: !!user.isAdmin,
     createdAt: user.createdAt,
     profile: user.profile,
     stats: {
@@ -664,6 +688,24 @@ function authedUser(req, res) {
     return null;
   }
   return hydrateUser(user);
+}
+
+function adminUser(req, res) {
+  const user = authedUser(req, res);
+  if (!user) return null;
+  if (!user.isAdmin) {
+    res.status(403).json({ ok: false, error: "Admin only." });
+    return null;
+  }
+  return user;
+}
+
+function sanitizeAdminUserPayload(user) {
+  hydrateUser(user);
+  const clone = JSON.parse(JSON.stringify(user));
+  delete clone.salt;
+  delete clone.passwordHash;
+  return clone;
 }
 
 function setProfileCosmetic(user, group, value) {
@@ -810,9 +852,11 @@ app.post("/api/me/shop/buy", async (req, res) => {
   const item = catalogItem(group, name);
   if (!item) return res.status(404).json({ ok: false, error: "Shop item not found." });
   if (ownsCosmetic(user, group, name)) return res.json({ ok: true, user: publicUser(user), alreadyOwned: true });
-  if ((user.stats.coins || 0) < item.price) return res.status(400).json({ ok: false, error: "Not enough coins." });
-  user.stats.coins -= item.price;
-  user.stats.coinsSpent += item.price;
+  if (!user.isAdmin) {
+    if ((user.stats.coins || 0) < item.price) return res.status(400).json({ ok: false, error: "Not enough coins." });
+    user.stats.coins -= item.price;
+    user.stats.coinsSpent += item.price;
+  }
   user.cosmetics[group] = [...new Set([...(user.cosmetics[group] || []), name])];
   saveUsers(userStore);
   await flushUserStoreWrites();
@@ -858,6 +902,115 @@ app.delete("/api/me", async (req, res) => {
   saveUsers(userStore);
   await flushUserStoreWrites();
   res.json({ ok: true });
+});
+
+app.get("/api/admin/users", (req, res) => {
+  const admin = adminUser(req, res);
+  if (!admin) return;
+  const users = Object.values(userStore.users || {}).map((u) => sanitizeAdminUserPayload(u));
+  users.sort((a, b) => String(a.username || "").localeCompare(String(b.username || ""), undefined, { sensitivity: "base" }));
+  res.json({ ok: true, users });
+});
+
+app.patch("/api/admin/users/:id", async (req, res) => {
+  const admin = adminUser(req, res);
+  if (!admin) return;
+  const target = userById(req.params.id);
+  if (!target) return res.status(404).json({ ok: false, error: "User not found." });
+  hydrateUser(target);
+
+  const incoming = req.body?.user;
+  if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "Missing user payload." });
+
+  if (typeof incoming.username === "string") {
+    const validation = validateSignup(incoming.username, "0000");
+    if (!validation.ok) return res.status(400).json({ ok: false, error: validation.error.replace("Password must be at least 4 characters.", "Invalid username.") });
+    const nextKey = usernameKey(validation.username);
+    if (nextKey !== target.usernameKey && userStore.users[nextKey] && userStore.users[nextKey].id !== target.id) {
+      return res.status(409).json({ ok: false, error: "Username is already taken." });
+    }
+    if (nextKey !== target.usernameKey) {
+      delete userStore.users[target.usernameKey];
+      target.username = validation.username;
+      target.usernameKey = nextKey;
+      userStore.users[nextKey] = target;
+      updateActivePlayerNames(target);
+    }
+  }
+
+  if (incoming.isAdmin != null) target.isAdmin = !!incoming.isAdmin;
+
+  if (incoming.stats && typeof incoming.stats === "object") {
+    const allowed = Object.keys(defaultStats());
+    let ratingUpdated = false;
+    for (const k of allowed) {
+      if (!(k in incoming.stats)) continue;
+      const v = Number(incoming.stats[k]);
+      if (!Number.isFinite(v)) continue;
+      target.stats[k] = Math.max(0, Math.round(v));
+      if (k === "rating") ratingUpdated = true;
+    }
+    if (ratingUpdated) {
+      target.stats.peakRating = Math.max(target.stats.peakRating || 0, target.stats.rating);
+    }
+  }
+
+  if (incoming.profile && typeof incoming.profile === "object") {
+    const p = incoming.profile;
+    if (typeof p.country === "string") target.profile.country = p.country.trim().slice(0, 32);
+    if (typeof p.bio === "string") target.profile.bio = p.bio.trim().slice(0, 160);
+    if (typeof p.onlineStatus === "string") target.profile.onlineStatus = p.onlineStatus.trim().slice(0, 32) || "Online";
+    if (typeof p.customAvatar === "string") target.profile.customAvatar = p.customAvatar.trim().slice(0, 4) || target.profile.customAvatar;
+    for (const [group, field] of Object.entries(COSMETIC_PROFILE_FIELDS)) {
+      if (typeof p[field] !== "string") continue;
+      const result = setProfileCosmetic(target, group, p[field]);
+      if (!result.ok) return res.status(400).json(result);
+    }
+    updateActivePlayerNames(target);
+  }
+
+  if (incoming.cosmetics && typeof incoming.cosmetics === "object") {
+    const next = {};
+    for (const [group, items] of Object.entries(incoming.cosmetics)) {
+      if (!COSMETIC_CATALOG[group]) continue;
+      if (!Array.isArray(items)) continue;
+      next[group] = [...new Set(items.map((x) => String(x)).filter(Boolean))].slice(0, 200);
+    }
+    target.cosmetics = { ...(target.cosmetics || {}), ...next };
+  }
+
+  if (incoming.social && typeof incoming.social === "object") {
+    const social = incoming.social;
+    if (Array.isArray(social.friends)) target.social.friends = [...new Set(social.friends.map((x) => normalizeUsername(x)).filter(Boolean))].slice(0, 200);
+    if (Array.isArray(social.rivals)) target.social.rivals = [...new Set(social.rivals.map((x) => normalizeUsername(x)).filter(Boolean))].slice(0, 200);
+    if (Array.isArray(social.clubs)) target.social.clubs = [...new Set(social.clubs.map((x) => String(x).trim().slice(0, 32)).filter(Boolean))].slice(0, 200);
+  }
+
+  if (Array.isArray(incoming.matchHistory)) {
+    target.matchHistory = incoming.matchHistory.slice(0, 50);
+  }
+
+  if (incoming.ruleCollection && typeof incoming.ruleCollection === "object") {
+    target.ruleCollection = incoming.ruleCollection;
+  }
+
+  hydrateUser(target);
+  saveUsers(userStore);
+  await flushUserStoreWrites();
+  res.json({ ok: true, user: sanitizeAdminUserPayload(target) });
+});
+
+app.get("/api/admin/flags", (req, res) => {
+  const admin = adminUser(req, res);
+  if (!admin) return;
+  res.json({ ok: true, flags: { ...runtimeFlags } });
+});
+
+app.patch("/api/admin/flags", (req, res) => {
+  const admin = adminUser(req, res);
+  if (!admin) return;
+  if (typeof req.body?.debugMode === "boolean") runtimeFlags.debugMode = req.body.debugMode;
+  res.json({ ok: true, flags: { ...runtimeFlags } });
 });
 
 app.use(
@@ -1508,7 +1661,7 @@ io.on("connection", (socket) => {
     if (!account) return cb?.({ ok: false, error: "Sign in before creating a server." });
     const code = createLobbyCode((c) => rooms.has(c));
     const room = createRoom(code, { visibility });
-    room.game = new Game({ roomCode: code, debugMode: DEBUG_MODE });
+    room.game = new Game({ roomCode: code, debugMode: runtimeFlags.debugMode });
     rooms.set(code, { room, socketsByPlayerId: new Map() });
 
     const player = room.addPlayer(socket.id, account.username);
@@ -1527,7 +1680,7 @@ io.on("connection", (socket) => {
     if (!account) return cb?.({ ok: false, error: "Sign in before starting singleplayer." });
     const code = createLobbyCode((c) => rooms.has(c));
     const room = createRoom(code, { visibility: "private" });
-    room.game = new Game({ roomCode: code, debugMode: DEBUG_MODE });
+    room.game = new Game({ roomCode: code, debugMode: runtimeFlags.debugMode });
     rooms.set(code, { room, socketsByPlayerId: new Map(), botTimer: null });
 
     const player = room.addPlayer(socket.id, account.username);

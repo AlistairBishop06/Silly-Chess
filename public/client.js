@@ -26,6 +26,7 @@ const els = {
   profileCloseBtn: document.getElementById("profileCloseBtn"),
   profileTabs: document.getElementById("profileTabs"),
   profileContent: document.getElementById("profileContent"),
+  adminTabBtn: document.getElementById("adminTabBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
   singleplayerBtn: document.getElementById("singleplayerBtn"),
   createBtn: document.getElementById("createBtn"),
@@ -57,10 +58,12 @@ const els = {
   youInfo: document.getElementById("youInfo"),
   turnInfo: document.getElementById("turnInfo"),
   plyInfo: document.getElementById("plyInfo"),
+  emoteBtn: document.getElementById("emoteBtn"),
   canvas: document.getElementById("board"),
   overlayText: document.getElementById("overlayText"),
   sideLabelTop: document.getElementById("sideLabelTop"),
   sideLabelBottom: document.getElementById("sideLabelBottom"),
+  boardWrap: document.querySelector(".boardWrap"),
   activeCards: document.getElementById("activeCards"),
   choiceArea: document.getElementById("choiceArea"),
   choiceCards: document.getElementById("choiceCards"),
@@ -125,6 +128,11 @@ const state = {
   authMode: "login",
   profileTab: "overview",
   lastProfileResultKey: null,
+  adminUsers: null,
+  adminFlags: null,
+  adminSelectedUserId: null,
+  adminUserDraft: "",
+  activeEmotes: {},
 };
 
 const confetti = {
@@ -237,6 +245,7 @@ function resetToLobby(reason) {
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
   state.supplyDrops = [];
+  state.activeEmotes = {};
   clearAds();
   stopConfetti();
   saveSession();
@@ -256,6 +265,7 @@ function enterLobby({ code, playerId, color }) {
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
   state.supplyDrops = [];
+  state.activeEmotes = {};
   clearAds();
   stopConfetti();
   if (els.resultModal) els.resultModal.hidden = true;
@@ -414,6 +424,8 @@ function closeProfileModal() {
 function renderProfile() {
   const user = state.account;
   if (!user || !els.profileContent) return;
+  if (els.adminTabBtn) els.adminTabBtn.hidden = !user.isAdmin;
+  if (state.profileTab === "admin" && !user.isAdmin) state.profileTab = "overview";
   const profile = user.profile || {};
   const stats = user.stats || {};
   const rank = user.rank || {};
@@ -459,6 +471,10 @@ function n(value) {
   return Number(value || 0).toLocaleString();
 }
 
+function coinsText(user) {
+  return user?.isAdmin ? "∞" : n(user?.stats?.coins);
+}
+
 function msDuration(ms) {
   const total = Math.max(0, Math.round(Number(ms || 0) / 1000));
   const minutes = Math.floor(total / 60);
@@ -478,6 +494,7 @@ function renderProfileTab(user, tab, winRate) {
   if (tab === "cosmetics") return renderCosmeticsTab(user);
   if (tab === "achievements") return renderAchievementsTab(user);
   if (tab === "settings") return renderSettingsTab(user);
+  if (tab === "admin") return renderAdminTab(user);
   return `
     <div class="profileGrid">
       <section class="profileSection">
@@ -488,7 +505,7 @@ function renderProfileTab(user, tab, winRate) {
           ${statTile("losses", n(s.losses))}
           ${statTile("draws", n(s.draws))}
           ${statTile("win rate", `${winRate}%`)}
-          ${statTile("coins", n(s.coins))}
+          ${statTile("coins", coinsText(user))}
           ${statTile("best streak", n(s.highestWinstreak))}
         </div>
       </section>
@@ -535,7 +552,7 @@ function renderStatsTab(user, winRate) {
           ${statTile("losses", n(s.losses))}
           ${statTile("draws", n(s.draws))}
           ${statTile("win rate", `${winRate}%`)}
-          ${statTile("coins", n(s.coins))}
+          ${statTile("coins", coinsText(user))}
           ${statTile("coins earned", n(s.coinsEarned))}
           ${statTile("coins spent", n(s.coinsSpent))}
           ${statTile("avg game length", `${n(s.averageGameLength)} turns`)}
@@ -660,7 +677,7 @@ function renderCosmeticsTab(user) {
     <section class="profileSection wide">
       <div class="shopHeader">
         <h3>Cosmetics / Shop</h3>
-        <div class="coinBalance">${n(user.stats?.coins)} coins</div>
+        <div class="coinBalance">${coinsText(user)} coins</div>
       </div>
       <div class="cosmeticGrid">
         ${Object.entries(cosmetics)
@@ -756,8 +773,158 @@ function renderInsights(user) {
   `;
 }
 
+function renderAdminTab(user) {
+  if (!user?.isAdmin) return `<div class="modalStatus">Admin only.</div>`;
+
+  const flags = state.adminFlags;
+  const users = Array.isArray(state.adminUsers) ? state.adminUsers : null;
+  const selected = state.adminSelectedUserId && users ? users.find((u) => u.id === state.adminSelectedUserId) : null;
+
+  const debugChecked = flags?.debugMode ? "checked" : "";
+  const debugLabel = flags ? (flags.debugMode ? "Debug mode is ON" : "Debug mode is OFF") : "Debug mode (load flags)";
+
+  const userOptions = users
+    ? users
+        .map(
+          (u) =>
+            `<option value="${escapeAttr(u.id)}"${u.id === state.adminSelectedUserId ? " selected" : ""}>${escapeHtml(u.username || u.id)}</option>`
+        )
+        .join("")
+    : `<option value="">(load users)</option>`;
+
+  const draft = state.adminUserDraft || (selected ? JSON.stringify(selected, null, 2) : "");
+
+  return `
+    <section class="profileSection wide">
+      <h3>Admin</h3>
+      <div class="settingsGrid">
+        <div class="fieldStack wide">
+          <label>
+            <input id="adminDebugToggle" type="checkbox" ${debugChecked} ${flags ? "" : "disabled"} />
+            ${escapeHtml(debugLabel)}
+          </label>
+          <div class="modalActions">
+            <button id="adminLoadFlagsBtn" type="button">Load flags</button>
+            <button id="adminRefreshUsersBtn" type="button">Refresh users</button>
+          </div>
+        </div>
+        <div class="fieldStack wide">
+          <label for="adminUserSelect">Select user</label>
+          <select id="adminUserSelect">${userOptions}</select>
+        </div>
+        <div class="fieldStack wide">
+          <label for="adminUserJson">Edit (JSON)</label>
+          <textarea id="adminUserJson" spellcheck="false" rows="14" placeholder="Load users, pick one, edit JSON here...">${escapeHtml(draft)}</textarea>
+        </div>
+      </div>
+      <div id="adminStatus" class="modalStatus"></div>
+      <div class="modalActions">
+        <button id="adminSaveUserBtn" class="primaryBtn" type="button" ${selected ? "" : "disabled"}>Save user</button>
+      </div>
+    </section>
+  `;
+}
+
 function escapeAttr(value) {
   return escapeHtml(value).replace(/"/g, "&quot;");
+}
+
+function setAdminStatus(text) {
+  const status = document.getElementById("adminStatus");
+  if (status) status.textContent = text || "";
+}
+
+function selectedAdminUser() {
+  if (!Array.isArray(state.adminUsers) || !state.adminSelectedUserId) return null;
+  return state.adminUsers.find((u) => u.id === state.adminSelectedUserId) || null;
+}
+
+async function adminLoadFlags() {
+  setAdminStatus("");
+  try {
+    const res = await fetch("/api/admin/flags", { headers: authHeaders(), cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to load flags.");
+    state.adminFlags = json.flags || null;
+    renderProfile();
+  } catch (err) {
+    setAdminStatus(err.message || "Failed to load flags.");
+  }
+}
+
+async function adminSetDebugMode(enabled) {
+  setAdminStatus("");
+  try {
+    const res = await fetch("/api/admin/flags", {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ debugMode: !!enabled }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to update flags.");
+    state.adminFlags = json.flags || null;
+    renderProfile();
+  } catch (err) {
+    setAdminStatus(err.message || "Failed to update flags.");
+    renderProfile();
+  }
+}
+
+async function adminRefreshUsers() {
+  setAdminStatus("");
+  try {
+    const res = await fetch("/api/admin/users", { headers: authHeaders(), cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to load users.");
+    state.adminUsers = Array.isArray(json.users) ? json.users : [];
+    if (state.adminSelectedUserId && !state.adminUsers.some((u) => u.id === state.adminSelectedUserId)) {
+      state.adminSelectedUserId = null;
+      state.adminUserDraft = "";
+    }
+    renderProfile();
+  } catch (err) {
+    setAdminStatus(err.message || "Failed to load users.");
+  }
+}
+
+function adminSelectUser(userId) {
+  state.adminSelectedUserId = userId || null;
+  const user = selectedAdminUser();
+  state.adminUserDraft = user ? JSON.stringify(user, null, 2) : "";
+  setAdminStatus("");
+  renderProfile();
+}
+
+function adminUpdateDraft(text) {
+  state.adminUserDraft = String(text ?? "");
+}
+
+async function adminSaveUser() {
+  const user = selectedAdminUser();
+  if (!user) return;
+  setAdminStatus("");
+  let parsed;
+  try {
+    parsed = JSON.parse(state.adminUserDraft || "{}");
+  } catch (err) {
+    setAdminStatus(`Invalid JSON: ${err.message || "parse error"}`);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ user: parsed }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to save user.");
+    setAdminStatus("Saved.");
+    await adminRefreshUsers();
+    adminSelectUser(user.id);
+  } catch (err) {
+    setAdminStatus(err.message || "Failed to save user.");
+  }
 }
 
 async function logout() {
@@ -987,6 +1154,101 @@ function squareToCanvasCenter(sq) {
   const x = (file + 0.5) * size;
   const y = (7 - rank + 0.5) * size;
   return { x, y };
+}
+
+function cosmeticSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function playerForColor(color) {
+  return (state.serverState?.players || []).find((p) => p.color === color) || null;
+}
+
+function playerForId(playerId) {
+  return (state.serverState?.players || []).find((p) => p.id === playerId) || null;
+}
+
+function profileForColor(color) {
+  return playerForColor(color)?.profile || null;
+}
+
+function profileForPlayerId(playerId) {
+  return playerForId(playerId)?.profile || null;
+}
+
+function localProfile() {
+  return profileForPlayerId(state.playerId) || state.account?.profile || {};
+}
+
+function boardPalette(name) {
+  const skin = cosmeticSlug(name || "Classic Chaos");
+  const palettes = {
+    "lava-board": { light: "#4b1d24", dark: "#170e14", accent: "#ffb15c", texture: "lava" },
+    midnight: { light: "#27345f", dark: "#0b1022", accent: "#7bd3ff", texture: "stars" },
+    "candy-clash": { light: "#ffe9f4", dark: "#74d7d0", accent: "#ff4f8b", texture: "candy" },
+    "arcade-grid": { light: "#142446", dark: "#07101f", accent: "#24d6c8", texture: "grid" },
+    "royal-marble": { light: "#f5f0df", dark: "#7b83a7", accent: "#d19b38", texture: "marble" },
+  };
+  return palettes[skin] || { light: "#dbe2ff", dark: "#3c4b83", accent: "#24d6c8", texture: "classic" };
+}
+
+function hazardFill(base, type, light) {
+  if (type === "lava") return light ? "#ffb4b4" : "#c24848";
+  if (type === "deadly") return light ? "#ffd7a8" : "#9a5520";
+  if (type === "lightning") return light ? "#fff1a8" : "#b88d1c";
+  if (type === "missing") return "rgba(10,12,18,0.65)";
+  return base;
+}
+
+function drawBoardTile(sq, x, y, size, light, palette, s, t) {
+  let hazard = "";
+  if (s.hazards?.lava?.includes(sq)) hazard = "lava";
+  if (s.hazards?.deadly?.includes(sq)) hazard = "deadly";
+  if (s.marks?.lightning?.includes(sq)) hazard = "lightning";
+  if (s.missingSquares?.includes(sq)) hazard = "missing";
+
+  ctx.fillStyle = hazardFill(light ? palette.light : palette.dark, hazard, light);
+  ctx.fillRect(x, y, size, size);
+
+  if (hazard && hazard !== "missing") return;
+  ctx.save();
+  ctx.globalAlpha = light ? 0.18 : 0.26;
+  if (palette.texture === "lava") {
+    ctx.strokeStyle = light ? "#ff8b4a" : "#ff4f5d";
+    ctx.lineWidth = Math.max(1, size * 0.018);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.15, y + size * (0.25 + 0.08 * Math.sin(t / 700 + sq)));
+    ctx.lineTo(x + size * 0.48, y + size * 0.52);
+    ctx.lineTo(x + size * 0.82, y + size * (0.38 + 0.08 * Math.cos(t / 820 + sq)));
+    ctx.stroke();
+  } else if (palette.texture === "stars") {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(x + size * (((sq * 17) % 71) / 80 + 0.06), y + size * (((sq * 29) % 67) / 80 + 0.08), Math.max(1, size * 0.012), 0, Math.PI * 2);
+    ctx.fill();
+  } else if (palette.texture === "candy") {
+    ctx.strokeStyle = light ? "#ff8ab0" : "#f8ffdc";
+    ctx.lineWidth = Math.max(2, size * 0.028);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.12, y + size * 0.88);
+    ctx.lineTo(x + size * 0.88, y + size * 0.12);
+    ctx.stroke();
+  } else if (palette.texture === "grid") {
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + size * 0.11, y + size * 0.11, size * 0.78, size * 0.78);
+  } else if (palette.texture === "marble") {
+    ctx.strokeStyle = light ? "#c9b27a" : "#d8dff6";
+    ctx.lineWidth = Math.max(1, size * 0.014);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.08, y + size * 0.32);
+    ctx.bezierCurveTo(x + size * 0.32, y + size * 0.15, x + size * 0.56, y + size * 0.85, x + size * 0.92, y + size * 0.62);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function activeRuleIds(s) {
@@ -1509,6 +1771,7 @@ function draw() {
   const t = nowMs();
   const fogVisible =
     s.fogOfWar && s.fogOfWarSquares && state.color ? new Set(s.fogOfWarSquares[state.color] || []) : null;
+  const palette = boardPalette(localProfile().boardSkin);
 
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
 
@@ -1521,14 +1784,7 @@ function draw() {
       x -= size / 2;
       y -= size / 2;
 
-      let fill = light ? "#dbe2ff" : "#3c4b83";
-      if (s.hazards?.lava?.includes(sq)) fill = light ? "#ffb4b4" : "#c24848";
-      if (s.hazards?.deadly?.includes(sq)) fill = light ? "#ffd7a8" : "#9a5520";
-      if (s.marks?.lightning?.includes(sq)) fill = light ? "#fff1a8" : "#b88d1c";
-      if (s.missingSquares?.includes(sq)) fill = "rgba(10,12,18,0.65)";
-
-      ctx.fillStyle = fill;
-      ctx.fillRect(x, y, size, size);
+      drawBoardTile(sq, x, y, size, light, palette, s, t);
 
       if (fogVisible && !fogVisible.has(sq) && !(s.missingSquares || []).includes(sq)) {
         ctx.fillStyle = "rgba(10,12,18,0.55)";
@@ -1897,6 +2153,136 @@ function drawLawnmowers(t) {
   state.lawnmowers = next;
 }
 
+function pieceGlyph(type, color, colourBlind = false) {
+  const map = {
+    p: { w: "\u2659", b: "\u265F" },
+    n: { w: "\u2658", b: "\u265E" },
+    b: { w: "\u2657", b: "\u265D" },
+    r: { w: "\u2656", b: "\u265C" },
+    q: { w: "\u2655", b: "\u265B" },
+    k: { w: "\u2654", b: "\u265A" },
+  };
+  return (colourBlind ? map[type]?.w : map[type]?.[color]) || "?";
+}
+
+function pieceSkinFor(p) {
+  return profileForColor(p?.color)?.pieceSkin || "Standard";
+}
+
+function pieceSkinStyle(p, colourBlind = false) {
+  const skin = cosmeticSlug(pieceSkinFor(p));
+  if (colourBlind) return { skin, fill: "rgba(210,215,226,0.92)", stroke: "rgba(10,12,18,0.42)", accent: "#7bd3ff" };
+  const white = p?.color === "w";
+  const styles = {
+    "royal-glass": {
+      fill: white ? "#ffffff" : "#101422",
+      stroke: white ? "rgba(120, 145, 190, 0.78)" : "rgba(236, 242, 255, 0.42)",
+      accent: "#d7e7ff",
+    },
+    "neon-plastic": {
+      fill: white ? "#f8fffb" : "#101827",
+      stroke: white ? "#24d6c8" : "#ff4f8b",
+      accent: white ? "#24d6c8" : "#ff4f8b",
+      glow: white ? "rgba(36, 214, 200, 0.82)" : "rgba(255, 79, 139, 0.78)",
+    },
+    "lava-stone": {
+      fill: white ? "#ffe6bd" : "#1a1010",
+      stroke: white ? "#9a5520" : "#ff7046",
+      accent: "#ff7046",
+      glow: "rgba(255, 90, 100, 0.62)",
+    },
+    "toy-army": {
+      fill: white ? "#f5f0d8" : "#18371f",
+      stroke: white ? "#9b7f42" : "#9cff6b",
+      accent: white ? "#ffd166" : "#9cff6b",
+    },
+    "void-metal": {
+      fill: white ? "#e9e6ff" : "#050711",
+      stroke: white ? "#8c6cff" : "#24d6c8",
+      accent: white ? "#8c6cff" : "#24d6c8",
+      glow: white ? "rgba(140, 108, 255, 0.72)" : "rgba(36, 214, 200, 0.72)",
+    },
+  };
+  return styles[skin] ? { skin, ...styles[skin] } : {
+    skin,
+    fill: white ? "#fbfbff" : "#101422",
+    stroke: white ? "rgba(10,12,18,0.28)" : "rgba(255,255,255,0.18)",
+    accent: white ? "#dbe2ff" : "#3c4b83",
+  };
+}
+
+function drawPieceSkinBase(x, y, size, p, style) {
+  const skin = style.skin;
+  if (!skin || skin === "standard") return;
+
+  ctx.save();
+  if (style.glow) {
+    ctx.shadowColor = style.glow;
+    ctx.shadowBlur = size * 0.22;
+  }
+
+  if (skin === "royal-glass") {
+    const g = ctx.createRadialGradient(x - size * 0.12, y - size * 0.15, size * 0.05, x, y, size * 0.42);
+    g.addColorStop(0, "rgba(255,255,255,0.82)");
+    g.addColorStop(0.45, p.color === "w" ? "rgba(215,231,255,0.48)" : "rgba(44,58,92,0.62)");
+    g.addColorStop(1, "rgba(255,255,255,0.08)");
+    ctx.fillStyle = g;
+    ctx.strokeStyle = style.stroke;
+    ctx.lineWidth = Math.max(2, size * 0.026);
+    ctx.beginPath();
+    ctx.ellipse(x, y + size * 0.03, size * 0.34, size * 0.39, -0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (skin === "neon-plastic") {
+    ctx.strokeStyle = style.accent;
+    ctx.lineWidth = Math.max(2, size * 0.032);
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.38, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = style.accent;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (skin === "lava-stone") {
+    ctx.fillStyle = p.color === "w" ? "rgba(64, 31, 22, 0.24)" : "rgba(255, 90, 100, 0.14)";
+    ctx.beginPath();
+    ctx.roundRect(x - size * 0.34, y - size * 0.34, size * 0.68, size * 0.68, size * 0.08);
+    ctx.fill();
+    ctx.strokeStyle = style.accent;
+    ctx.lineWidth = Math.max(1.5, size * 0.018);
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.24, y - size * 0.08);
+    ctx.lineTo(x - size * 0.04, y + size * 0.08);
+    ctx.lineTo(x + size * 0.22, y - size * 0.1);
+    ctx.stroke();
+  } else if (skin === "toy-army") {
+    ctx.fillStyle = p.color === "w" ? "rgba(255, 209, 102, 0.22)" : "rgba(156, 255, 107, 0.18)";
+    ctx.strokeStyle = style.stroke;
+    ctx.lineWidth = Math.max(2, size * 0.025);
+    ctx.beginPath();
+    ctx.roundRect(x - size * 0.35, y - size * 0.35, size * 0.7, size * 0.7, size * 0.16);
+    ctx.fill();
+    ctx.stroke();
+  } else if (skin === "void-metal") {
+    const g = ctx.createLinearGradient(x - size * 0.34, y - size * 0.36, x + size * 0.34, y + size * 0.36);
+    g.addColorStop(0, p.color === "w" ? "#ffffff" : "#111827");
+    g.addColorStop(0.48, p.color === "w" ? "#aaa4ff" : "#050711");
+    g.addColorStop(1, style.accent);
+    ctx.fillStyle = g;
+    ctx.globalAlpha = 0.28;
+    ctx.beginPath();
+    ctx.moveTo(x, y - size * 0.43);
+    ctx.lineTo(x + size * 0.36, y - size * 0.06);
+    ctx.lineTo(x + size * 0.22, y + size * 0.38);
+    ctx.lineTo(x - size * 0.26, y + size * 0.34);
+    ctx.lineTo(x - size * 0.38, y - size * 0.08);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawPiece(sq, p) {
   const { x, y } = squareToCanvasCenter(sq);
   drawPieceAt(x, y, p, sq);
@@ -1909,14 +2295,7 @@ function drawPieceAt(x, y, p, sq = null) {
     p?.type === "k" && p?.color && state.serverState?.shield && typeof state.serverState.shield[p.color] === "number"
       ? state.serverState.shield[p.color]
       : 0;
-  const map = {
-    p: { w: "\u2659", b: "\u265F" },
-    n: { w: "\u2658", b: "\u265E" },
-    b: { w: "\u2657", b: "\u265D" },
-    r: { w: "\u2656", b: "\u265C" },
-    q: { w: "\u2655", b: "\u265B" },
-    k: { w: "\u2654", b: "\u265A" },
-  };
+  const pieceStyle = pieceSkinStyle(p, colourBlind);
 
   // Subtle glow for last move.
   if (sq != null && (state.serverState.lastMoveSquares || []).includes(sq)) {
@@ -1943,20 +2322,22 @@ function drawPieceAt(x, y, p, sq = null) {
     }
   }
 
+  drawPieceSkinBase(x, y, size, p, pieceStyle);
+
   ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  if (colourBlind) {
-    ctx.fillStyle = "rgba(210,215,226,0.92)";
-    ctx.strokeStyle = "rgba(10,12,18,0.42)";
-  } else {
-    ctx.fillStyle = p.color === "w" ? "#fbfbff" : "#101422";
-    ctx.strokeStyle = p.color === "w" ? "rgba(10,12,18,0.28)" : "rgba(255,255,255,0.18)";
+  ctx.fillStyle = pieceStyle.fill;
+  ctx.strokeStyle = pieceStyle.stroke;
+  if (pieceStyle.glow) {
+    ctx.shadowColor = pieceStyle.glow;
+    ctx.shadowBlur = size * 0.08;
   }
   ctx.lineWidth = 4;
-  const glyph = (colourBlind ? map[p.type]?.w : map[p.type]?.[p.color]) || "?";
+  const glyph = pieceGlyph(p.type, p.color, colourBlind);
   ctx.strokeText(glyph, x, y + 2);
   ctx.fillText(glyph, x, y);
+  ctx.shadowBlur = 0;
 
   // Rule icon (tiny dot).
   if (p.tags?.includes("tempQueen")) {
@@ -2038,21 +2419,19 @@ function drawTitanPiece(sq, p) {
   ctx.fill();
   ctx.stroke();
 
-  const map = {
-    p: { w: "\u2659", b: "\u265F" },
-    n: { w: "\u2658", b: "\u265E" },
-    b: { w: "\u2657", b: "\u265D" },
-    r: { w: "\u2656", b: "\u265C" },
-    q: { w: "\u2655", b: "\u265B" },
-    k: { w: "\u2654", b: "\u265A" },
-  };
+  const pieceStyle = pieceSkinStyle(p, !!state.serverState?.colourBlind);
+  drawPieceSkinBase(centerX, centerY, size * 1.55, p, pieceStyle);
   ctx.font = `${Math.floor(size * 1.05)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = p.color === "w" ? "#fffdf7" : "#101422";
-  ctx.strokeStyle = p.color === "w" ? "rgba(10,12,18,0.42)" : "rgba(255,255,255,0.28)";
+  ctx.fillStyle = pieceStyle.fill;
+  ctx.strokeStyle = pieceStyle.stroke;
+  if (pieceStyle.glow) {
+    ctx.shadowColor = pieceStyle.glow;
+    ctx.shadowBlur = size * 0.16;
+  }
   ctx.lineWidth = 7;
-  const glyph = map[p.type]?.[p.color] || "?";
+  const glyph = pieceGlyph(p.type, p.color, !!state.serverState?.colourBlind);
   ctx.strokeText(glyph, centerX, centerY + 4);
   ctx.fillText(glyph, centerX, centerY);
   ctx.restore();
@@ -2136,7 +2515,7 @@ function ruleArtIcon(ruleId, ruleName) {
 
 function buildRuleCard(r, { pickable }) {
   const div = document.createElement("div");
-  div.className = `card ${pickable ? "pickable" : ""} ${r.kind}`.trim().replace(/\s+/g, " ");
+  div.className = `card ${pickable ? "pickable" : ""} ${r.kind} ${cardBackClass()}`.trim().replace(/\s+/g, " ");
 
   const turns = r.remaining != null ? `${r.remaining}t` : "";
   const typeIcon = ruleTypeIcon(r.kind);
@@ -2598,6 +2977,51 @@ function renderOpenServers() {
   }
 }
 
+function borderClass(profile) {
+  const slug = cosmeticSlug(profile?.border || "None");
+  return slug && slug !== "none" ? `skin-border-${slug}` : "";
+}
+
+function cardBackClass() {
+  const slug = cosmeticSlug(localProfile().cardBack || "Classic Cards");
+  return slug && slug !== "classic-cards" ? `cardBack-${slug}` : "";
+}
+
+function currentEmote(playerId) {
+  const emote = state.activeEmotes[playerId];
+  if (!emote) return "";
+  if (Date.now() > emote.until) {
+    delete state.activeEmotes[playerId];
+    return "";
+  }
+  return emote.text || "";
+}
+
+function renderBoardName(player) {
+  if (!player) return "";
+  const profile = player.profile || {};
+  const avatar = (profile.avatar || player.name || "?").slice(0, 4).toUpperCase();
+  const emote = currentEmote(player.id);
+  const cls = ["boardNameAvatar", borderClass(profile)].filter(Boolean).join(" ");
+  return `
+    <span class="${escapeAttr(cls)}">${escapeHtml(avatar)}</span>
+    <span class="boardNameText">${escapeHtml(player.name || "Player")}</span>
+    ${emote ? `<span class="boardNameEmote">${escapeHtml(emote)}</span>` : ""}
+  `;
+}
+
+function applyGameCosmetics() {
+  const profile = localProfile();
+  if (els.boardWrap) {
+    [...els.boardWrap.classList].forEach((cls) => {
+      if (cls.startsWith("skin-border-")) els.boardWrap.classList.remove(cls);
+    });
+    const cls = borderClass(profile);
+    if (cls) els.boardWrap.classList.add(cls);
+  }
+  if (els.emoteBtn) els.emoteBtn.textContent = profile.emote || "Emote";
+}
+
 function syncUI() {
   const s = state.serverState;
   const connected = !!state.lobby;
@@ -2654,9 +3078,12 @@ function syncUI() {
 
   const whiteName = (players.find((p) => p.color === "w")?.name || "White").trim();
   const blackName = (players.find((p) => p.color === "b")?.name || "Black").trim();
+  const whitePlayer = players.find((p) => p.color === "w") || { name: whiteName, color: "w", profile: null };
+  const blackPlayer = players.find((p) => p.color === "b") || { name: blackName, color: "b", profile: null };
   const topIsWhite = !!state.flipVisual;
-  if (els.sideLabelTop) els.sideLabelTop.textContent = topIsWhite ? whiteName : blackName;
-  if (els.sideLabelBottom) els.sideLabelBottom.textContent = topIsWhite ? blackName : whiteName;
+  if (els.sideLabelTop) els.sideLabelTop.innerHTML = renderBoardName(topIsWhite ? whitePlayer : blackPlayer);
+  if (els.sideLabelBottom) els.sideLabelBottom.innerHTML = renderBoardName(topIsWhite ? blackPlayer : whitePlayer);
+  applyGameCosmetics();
   els.canvas.style.cursor =
     s.phase === "pawnSoldierShot" && s.pendingPawnSoldierShot?.playerId === state.playerId ? "crosshair" : "";
 
@@ -2776,6 +3203,15 @@ socket.on("lobby:message", (m) => {
   logLine(escapeHtml(m.text || ""));
 });
 
+socket.on("game:emote", (m) => {
+  if (!m?.playerId) return;
+  const text = String(m.text || "").slice(0, 40);
+  state.activeEmotes[m.playerId] = { text, until: Date.now() + 3600 };
+  logLine(`<strong>${escapeHtml(m.name || "Player")}</strong>: ${escapeHtml(text)}`);
+  syncUI();
+  setTimeout(() => syncUI(), 3700);
+});
+
 socket.on("game:state", (s) => {
   // The server can send pushes for rooms this socket is still subscribed to.
   // Only accept state for the currently active lobby.
@@ -2835,8 +3271,22 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (target?.id === "changePasswordBtn") changePassword();
   if (target?.id === "addFriendBtn") addFriend();
   if (target?.id === "deleteAccountBtn") deleteAccount();
+  if (target?.id === "adminLoadFlagsBtn") adminLoadFlags();
+  if (target?.id === "adminRefreshUsersBtn") adminRefreshUsers();
+  if (target?.id === "adminSaveUserBtn") adminSaveUser();
   const buyBtn = target?.closest?.(".buyCosmeticBtn");
   if (buyBtn) buyCosmetic(buyBtn.dataset.buyGroup, buyBtn.dataset.buyName);
+});
+
+els.profileContent?.addEventListener("change", (ev) => {
+  const target = ev.target;
+  if (target?.id === "adminUserSelect") adminSelectUser(target.value);
+  if (target?.id === "adminDebugToggle") adminSetDebugMode(!!target.checked);
+});
+
+els.profileContent?.addEventListener("input", (ev) => {
+  const target = ev.target;
+  if (target?.id === "adminUserJson") adminUpdateDraft(target.value);
 });
 
 els.authCloseBtn?.addEventListener("click", () => closeAuthModal());
@@ -2913,9 +3363,17 @@ function sendRpsChoice(choice) {
   });
 }
 
+function sendEmote() {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:emote", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "emote failed")}`);
+  });
+}
+
 els.rpsRockBtn?.addEventListener("click", () => sendRpsChoice("rock"));
 els.rpsPaperBtn?.addEventListener("click", () => sendRpsChoice("paper"));
 els.rpsScissorsBtn?.addEventListener("click", () => sendRpsChoice("scissors"));
+els.emoteBtn?.addEventListener("click", () => sendEmote());
 
 els.wagerConfirmBtn?.addEventListener("click", () => {
   if (!state.lobby || !state.playerId) return;

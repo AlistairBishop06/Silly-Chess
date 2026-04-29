@@ -708,6 +708,7 @@ body.is-in-game:not(.is-choosing) #gamePanel {
 }
 
 .boardNameAvatar {
+  position: relative;
   flex: 0 0 auto;
   width: clamp(30px, 3vw, 40px);
   height: clamp(30px, 3vw, 40px);
@@ -723,6 +724,14 @@ body.is-in-game:not(.is-choosing) #gamePanel {
   text-shadow: none;
 }
 
+.boardNameAvatar::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 10px;
+  pointer-events: none;
+}
+
 .boardNameText {
   min-width: 0;
   overflow: hidden;
@@ -730,6 +739,7 @@ body.is-in-game:not(.is-choosing) #gamePanel {
 }
 
 .boardNameEmote {
+  animation: emotePop 3.6s ease both;
   max-width: 118px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -740,6 +750,22 @@ body.is-in-game:not(.is-choosing) #gamePanel {
   color: rgba(255, 255, 255, 0.78);
   font-size: 11px;
   font-weight: 760;
+}
+
+@keyframes emotePop {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  9%,
+  82% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.98);
+  }
 }
 
 .boardWrap {
