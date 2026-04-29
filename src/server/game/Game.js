@@ -129,6 +129,7 @@ class Game {
     this.supermarket = null;
 
     this.lastMoveSquares = [];
+    this.moveList = [];
 
     this.trailBlocks = [];
     this.requestTimeReverse = 0;
@@ -136,6 +137,15 @@ class Game {
     this.pendingTargetRules = [];
     this.pendingPawnSoldierShot = null;
     this.backupPlanActive = { w: false, b: false };
+    this.matchStats = {
+      captures: { w: 0, b: 0 },
+      extraMoves: { w: 0, b: 0 },
+      promotions: { w: 0, b: 0 },
+      queensSacrificed: { w: 0, b: 0 },
+      kingsExploded: { w: 0, b: 0 },
+      lavaDeaths: { w: 0, b: 0 },
+      ruleUses: { w: {}, b: {} },
+    };
 
     // Mini-games.
     this.rps = null; // { round, byColor:{w,b}, pickedByColor:{w,b}, deadlineMs }
@@ -509,6 +519,21 @@ class Game {
     return p?.name || (p?.color === "w" ? "White" : p?.color === "b" ? "Black" : "Player");
   }
 
+  noteRuleUse(color, ruleId) {
+    if ((color !== "w" && color !== "b") || !ruleId) return;
+    const bucket = this.matchStats?.ruleUses?.[color];
+    if (!bucket) return;
+    bucket[ruleId] = (bucket[ruleId] || 0) + 1;
+  }
+
+  noteCapturedPiece(attackerColor, capturedPiece) {
+    if ((attackerColor !== "w" && attackerColor !== "b") || !capturedPiece || capturedPiece.color === "x") return;
+    this.matchStats.captures[attackerColor] += 1;
+    if (capturedPiece.type === "q" && (capturedPiece.color === "w" || capturedPiece.color === "b")) {
+      this.matchStats.queensSacrificed[capturedPiece.color] += 1;
+    }
+  }
+
   addSupermarket({ square, instanceId }) {
     if (square == null || square < 0 || square > 63) return;
     this.supermarkets.push({ square, instanceId: instanceId || null, ruleId: "dur_supermarket_10" });
@@ -618,6 +643,7 @@ class Game {
       const color = this.playerColor(playerId);
       const name = getRuleById(ruleId)?.name || ruleId;
       this.effects.push({ type: "log", id: this.nextEffectId(), text: `Bonus rule picked: ${name}` });
+      this.noteRuleUse(color, ruleId);
       this.ruleManager.addRule(ruleId, { playerId, color });
 
       this.bonusRuleChoice.remainingPicks -= 1;
@@ -676,7 +702,10 @@ class Game {
     this.ruleChoiceDeadlineMs = null;
 
     for (const pick of picks) {
-      if (pick.ruleId) this.ruleManager.addRule(pick.ruleId, { playerId: pick.player.id, color: pick.player.color });
+      if (pick.ruleId) {
+        this.noteRuleUse(pick.player.color, pick.ruleId);
+        this.ruleManager.addRule(pick.ruleId, { playerId: pick.player.id, color: pick.player.color });
+      }
     }
 
     if (this.phase === beforePhase || this.phase === "bonusRuleChoice") this.resumePendingRuleWorkOrPlay();
@@ -1112,6 +1141,8 @@ class Game {
     if (this.hazards.deadly.has(toSquare) || this.hazards.lava.has(toSquare)) {
       const p = this.state.board[toSquare];
       if (p && p.color !== "x") {
+        if (this.hazards.lava.has(toSquare) && (p.color === "w" || p.color === "b")) this.matchStats.lavaDeaths[p.color] += 1;
+        if (p.type === "k" && (p.color === "w" || p.color === "b")) this.matchStats.kingsExploded[p.color] += 1;
         this.state.board[toSquare] = null;
         this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "hazard" });
         changed = true;
@@ -1121,6 +1152,7 @@ class Game {
     if (this.hazards.asteroid.has(toSquare)) {
       const p = this.state.board[toSquare];
       if (p && p.color !== "x") {
+        if (p.type === "k" && (p.color === "w" || p.color === "b")) this.matchStats.kingsExploded[p.color] += 1;
         this.state.board[toSquare] = null;
         this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [toSquare], reason: "asteroid" });
         changed = true;
@@ -1679,6 +1711,7 @@ class Game {
 
       this.applyTitanMove(from, to);
       this.ply += 1;
+      this.moveList.push(`${this.squareName(from)}-${this.squareName(to)}`);
       let finalTo = to;
       this.lastMoveSquares = [from, to];
 
@@ -1699,7 +1732,10 @@ class Game {
       this.applyHazardsToAllPieces();
       this.clearStickyLocks(color);
       this.applyStickyLanding(finalTo);
-      if (mods.moveTwice) this.extraMoves[color] += 1;
+      if (mods.moveTwice) {
+        this.extraMoves[color] += 1;
+        this.matchStats.extraMoves[color] += 1;
+      }
 
       if (this.extraMoves[color] > 0) {
         this.extraMoves[color] -= 1;
@@ -1738,10 +1774,12 @@ class Game {
     const enPassantCapture = piece.type === "p" && this.state.enPassant != null && to === this.state.enPassant && !this.state.board[to];
     const capture = !!this.state.board[to] || enPassantCapture;
     const captureSquare = enPassantCapture ? toIdx(idxToFile(to), idxToRank(to) + (piece.color === "w" ? -1 : 1)) : capture ? to : null;
+    const capturedPiece = captureSquare != null && this.state.board[captureSquare] ? { ...this.state.board[captureSquare] } : null;
 
     const next = applyMoveNoValidation(this.state, { from, to, promotion }, mods);
     this.state = next;
     this.ply += 1;
+    this.moveList.push(`${this.squareName(from)}-${this.squareName(to)}`);
     let finalTo = to;
     this.lastMoveSquares = [from, to];
     const baseMovePiece = serializeBoard([this.state.board[to]])[0];
@@ -1849,7 +1887,10 @@ class Game {
     const sourceFan = this.fans.find((f) => f.rank === idxToRank(from));
     if (sourceFan && idxToRank(finalTo) !== idxToRank(from)) this.applyFanRow(sourceFan);
 
-    if (capture) this.noteCaptureSquare(captureSquare);
+    if (capture) {
+      this.noteCaptureSquare(captureSquare);
+      this.noteCapturedPiece(color, capturedPiece);
+    }
 
     // King of the Hill: promote pieces on central squares.
     if (mods.kingOfHill) this.applyKingOfHill();
@@ -1864,7 +1905,16 @@ class Game {
     this.applyStickyLanding(finalTo);
 
     // Move-twice.
-    if (mods.moveTwice) this.extraMoves[color] += 1;
+    if (piece.type === "p") {
+      const promotionRank = color === "w" ? 7 : 0;
+      const promoted = idxToRank(to) === promotionRank && this.state.board[to]?.type !== "p";
+      if (promoted) this.matchStats.promotions[color] += 1;
+    }
+
+    if (mods.moveTwice) {
+      this.extraMoves[color] += 1;
+      this.matchStats.extraMoves[color] += 1;
+    }
 
     if (this.extraMoves[color] > 0) {
       this.extraMoves[color] -= 1;

@@ -56,6 +56,22 @@ Environment variables:
 - `PORT` (default: `3000`): HTTP port.
 - `RULE_CHOICE_EVERY_PLIES` (default: `7`): how often players draft rule cards.
 - `RULE_CHOICE_DURATION_MS` (default: `30000`): time window to pick a rule card.
+- `DATABASE_URL` (optional): PostgreSQL connection string. If set, account/session/profile data is stored in Postgres instead of `data/users.json`.
+- Local env files: the server will read `.env` first, then `env`, if present.
+
+Example PowerShell session:
+
+```powershell
+$env:DATABASE_URL="postgresql://user:password@host/db?sslmode=require"
+npm start
+```
+
+Example `.env` or `env` file:
+
+```dotenv
+DATABASE_URL=postgresql://user:password@host/db?sslmode=require
+PORT=3000
+```
 
 ## Project Structure
 

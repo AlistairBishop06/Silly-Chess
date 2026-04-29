@@ -13,7 +13,10 @@
           <span class="brandMark" aria-hidden="true">CC</span>
           <span>Chaos Chess</span>
         </div>
-        <div id="status" class="status">Not connected</div>
+        <div class="topbarRight">
+          <div id="status" class="status">Not connected</div>
+          <button id="profileBtn" class="profileBtn" type="button">Sign in</button>
+        </div>
       </header>
 
       <main class="layout">
@@ -39,9 +42,11 @@
             </div>
 
             <div class="joinConsole">
-              <div class="fieldStack">
-                <label for="nameInput">Player name</label>
-                <input id="nameInput" placeholder="Name" maxlength="16" autocomplete="nickname" />
+              <div class="accountStrip">
+                <div>
+                  <label>Account</label>
+                  <div id="accountSummary" class="accountSummary">Sign up or log in to play.</div>
+                </div>
               </div>
               <div class="joinGrid">
                 <button id="createBtn" class="primaryBtn" type="button">Create Server</button>
@@ -196,9 +201,6 @@
         <section class="right">
           <div class="panel helpPanel">
             <h2>Table rules</h2>
-            <div class="row gap" style="margin-top: 10px;">
-              <button id="rulebookBtn" type="button">View all rule cards</button>
-            </div>
             <div class="help">
               Play normal chess until the rule draft opens every 7 rounds. Each player must then choose a card that mutates the match. What rules will you add to claim victory?
               <br>
@@ -280,7 +282,55 @@
       </div>
     </div>
 
+    <div id="authModal" class="modal" hidden>
+      <div class="modalCard accountCard">
+        <div class="cardsHeader">
+          <h3 id="authTitle">Sign in</h3>
+          <div class="rulebookActions">
+            <button id="authCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="authTabs">
+          <button id="loginTabBtn" class="active" type="button">Log in</button>
+          <button id="signupTabBtn" type="button">Sign up</button>
+        </div>
+        <div class="fieldStack">
+          <label for="authUsername">Username</label>
+          <input id="authUsername" placeholder="Username" maxlength="16" autocomplete="username" />
+        </div>
+        <div class="fieldStack">
+          <label for="authPassword">Password</label>
+          <input id="authPassword" placeholder="Password" type="password" autocomplete="current-password" />
+        </div>
+        <div id="authStatus" class="modalStatus"></div>
+        <div class="modalActions">
+          <button id="authSubmitBtn" class="primaryBtn" type="button">Log in</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="profileModal" class="modal" hidden>
+      <div class="modalCard profileCard">
+        <div class="cardsHeader">
+          <h3>Profile</h3>
+          <div class="rulebookActions">
+            <button id="profileCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div id="profileTabs" class="profileTabs">
+          <button data-tab="overview" class="active" type="button">Overview</button>
+          <button data-tab="stats" type="button">Stats</button>
+          <button data-tab="history" type="button">Match History</button>
+          <button data-tab="rules" type="button">Rules</button>
+          <button data-tab="cosmetics" type="button">Cosmetics</button>
+          <button data-tab="achievements" type="button">Achievements</button>
+          <button data-tab="settings" type="button">Settings</button>
+        </div>
+        <div id="profileContent" class="profileContent"></div>
+      </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
-    <script src="client.js?v=20260427"></script>
+    <script src="client.js?v=20260429"></script>
   </body>
 </html>

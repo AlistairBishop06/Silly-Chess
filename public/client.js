@@ -10,7 +10,23 @@ const socket = io({
 
 const els = {
   status: document.getElementById("status"),
-  name: document.getElementById("nameInput"),
+  profileBtn: document.getElementById("profileBtn"),
+  accountSummary: document.getElementById("accountSummary"),
+  accountActionBtn: document.getElementById("accountActionBtn"),
+  authModal: document.getElementById("authModal"),
+  authTitle: document.getElementById("authTitle"),
+  authCloseBtn: document.getElementById("authCloseBtn"),
+  loginTabBtn: document.getElementById("loginTabBtn"),
+  signupTabBtn: document.getElementById("signupTabBtn"),
+  authUsername: document.getElementById("authUsername"),
+  authPassword: document.getElementById("authPassword"),
+  authStatus: document.getElementById("authStatus"),
+  authSubmitBtn: document.getElementById("authSubmitBtn"),
+  profileModal: document.getElementById("profileModal"),
+  profileCloseBtn: document.getElementById("profileCloseBtn"),
+  profileTabs: document.getElementById("profileTabs"),
+  profileContent: document.getElementById("profileContent"),
+  logoutBtn: document.getElementById("logoutBtn"),
   singleplayerBtn: document.getElementById("singleplayerBtn"),
   createBtn: document.getElementById("createBtn"),
   createModal: document.getElementById("createModal"),
@@ -104,6 +120,11 @@ const state = {
   supermarketKey: null,
   ads: [],
   nextAdAt: 0,
+  authToken: null,
+  account: null,
+  authMode: "login",
+  profileTab: "overview",
+  lastProfileResultKey: null,
 };
 
 const confetti = {
@@ -269,6 +290,606 @@ function saveSession() {
   }
 }
 
+function loadAccountSession() {
+  try {
+    const raw = localStorage.getItem("chaosChessAccount");
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved?.token === "string") state.authToken = saved.token;
+    if (saved?.user && typeof saved.user === "object") state.account = saved.user;
+  } catch {
+    // ignore
+  }
+}
+
+function saveAccountSession() {
+  try {
+    if (!state.authToken || !state.account) {
+      localStorage.removeItem("chaosChessAccount");
+      return;
+    }
+    localStorage.setItem("chaosChessAccount", JSON.stringify({ token: state.authToken, user: state.account }));
+  } catch {
+    // ignore
+  }
+}
+
+function authHeaders() {
+  return state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {};
+}
+
+async function refreshAccount() {
+  if (!state.authToken) {
+    state.account = null;
+    renderAccountUI();
+    return;
+  }
+  try {
+    const res = await fetch("/api/me", { headers: authHeaders() });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Not signed in.");
+    state.account = json.user;
+    saveAccountSession();
+  } catch {
+    state.authToken = null;
+    state.account = null;
+    saveAccountSession();
+  }
+  renderAccountUI();
+  if (state.account && els.profileModal && !els.profileModal.hidden) renderProfile();
+}
+
+function renderAccountUI() {
+  const user = state.account;
+  const signedIn = !!user;
+  if (els.accountSummary) els.accountSummary.textContent = signedIn ? `Playing as ${user.username}` : "Sign up or log in to play.";
+  if (els.accountActionBtn) els.accountActionBtn.textContent = signedIn ? "Profile" : "Sign in";
+  if (els.profileBtn) els.profileBtn.textContent = signedIn ? user.username : "Sign in";
+}
+
+function openAuthModal(mode = "login") {
+  state.authMode = mode === "signup" ? "signup" : "login";
+  if (!els.authModal) return;
+  els.authModal.hidden = false;
+  renderAuthMode();
+  setTimeout(() => els.authUsername?.focus(), 0);
+}
+
+function closeAuthModal() {
+  if (els.authModal) els.authModal.hidden = true;
+}
+
+function renderAuthMode() {
+  const signup = state.authMode === "signup";
+  if (els.authTitle) els.authTitle.textContent = signup ? "Sign up" : "Sign in";
+  if (els.authSubmitBtn) els.authSubmitBtn.textContent = signup ? "Create account" : "Log in";
+  els.loginTabBtn?.classList.toggle("active", !signup);
+  els.signupTabBtn?.classList.toggle("active", signup);
+  if (els.authPassword) els.authPassword.autocomplete = signup ? "new-password" : "current-password";
+  if (els.authStatus) els.authStatus.textContent = "";
+}
+
+async function submitAuth() {
+  const username = els.authUsername?.value.trim() || "";
+  const password = els.authPassword?.value || "";
+  const route = state.authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+  if (els.authStatus) els.authStatus.textContent = "";
+  try {
+    const res = await fetch(route, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Account request failed.");
+    state.authToken = json.token;
+    state.account = json.user;
+    saveAccountSession();
+    renderAccountUI();
+    closeAuthModal();
+    if (els.authPassword) els.authPassword.value = "";
+  } catch (err) {
+    if (els.authStatus) els.authStatus.textContent = err.message || "Account request failed.";
+  }
+}
+
+function ensureSignedIn() {
+  if (state.account && state.authToken) return true;
+  openAuthModal("login");
+  if (els.authStatus) els.authStatus.textContent = "Sign in or create an account to play.";
+  return false;
+}
+
+function openProfileModal() {
+  if (!state.account) return openAuthModal("login");
+  if (!els.profileModal) return;
+  renderProfile();
+  els.profileModal.hidden = false;
+}
+
+function closeProfileModal() {
+  if (els.profileModal) els.profileModal.hidden = true;
+}
+
+function renderProfile() {
+  const user = state.account;
+  if (!user || !els.profileContent) return;
+  const profile = user.profile || {};
+  const stats = user.stats || {};
+  const rank = user.rank || {};
+  const created = user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-";
+  const winRate = Number(stats.winRate || 0);
+  const avatar = escapeHtml(profile.avatar || user.username.slice(0, 2).toUpperCase());
+  const country = profile.country ? `<span>${escapeHtml(profile.country)}</span>` : `<span>Region unset</span>`;
+  const bio = profile.bio ? escapeHtml(profile.bio) : "No bio yet.";
+  const tier = escapeHtml(rank.tier || "Bronze");
+  const progress = Math.max(0, Math.min(100, Number(rank.progress || 0)));
+
+  const hero = `
+    <div class="profileHero profileBanner-${bannerClass(profile.banner)}">
+      <div class="profileAvatar">${avatar}</div>
+      <div class="profileHeroMain">
+        <div class="profileNameRow">
+          <div>
+            <div class="profileName">${escapeHtml(user.username)}</div>
+            <div class="profileMeta">Joined ${escapeHtml(created)} &middot; ${country} &middot; <span class="onlineDot"></span>${escapeHtml(profile.onlineStatus || "Online")}</div>
+          </div>
+          <div class="rankBadge">
+            <strong>${tier}</strong>
+            <span>${Number(rank.rating || 1000)} MMR</span>
+          </div>
+        </div>
+        <div class="profileBio">${bio}</div>
+        <div class="rankProgress"><span style="width: ${progress}%"></span></div>
+        <div class="profileMeta">${rank.nextTierAt ? `${progress}% to next rank at ${rank.nextTierAt}` : "Top rank reached"} &middot; Seasonal rank: ${escapeHtml(rank.seasonalRank || tier)}</div>
+      </div>
+    </div>
+  `;
+
+  const tab = state.profileTab || "overview";
+  els.profileTabs?.querySelectorAll("button").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
+  els.profileContent.innerHTML = hero + renderProfileTab(user, tab, winRate);
+}
+
+function bannerClass(name) {
+  return String(name || "Sunset Clash").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "sunset-clash";
+}
+
+function n(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function msDuration(ms) {
+  const total = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function statTile(label, value) {
+  return `<div><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderProfileTab(user, tab, winRate) {
+  const s = user.stats || {};
+  if (tab === "stats") return renderStatsTab(user, winRate);
+  if (tab === "history") return renderHistoryTab(user);
+  if (tab === "rules") return renderRulesTab(user);
+  if (tab === "cosmetics") return renderCosmeticsTab(user);
+  if (tab === "achievements") return renderAchievementsTab(user);
+  if (tab === "settings") return renderSettingsTab(user);
+  return `
+    <div class="profileGrid">
+      <section class="profileSection">
+        <h3>Overall</h3>
+        <div class="profileStats">
+          ${statTile("games played", n(s.gamesPlayed))}
+          ${statTile("wins", n(s.wins))}
+          ${statTile("losses", n(s.losses))}
+          ${statTile("draws", n(s.draws))}
+          ${statTile("win rate", `${winRate}%`)}
+          ${statTile("coins", n(s.coins))}
+          ${statTile("best streak", n(s.highestWinstreak))}
+        </div>
+      </section>
+      <section class="profileSection">
+        <h3>Rule Identity</h3>
+        <div class="profileList">
+          <div><span>Favourite rule</span><strong>${escapeHtml(s.favoriteRule?.name || "None yet")}</strong></div>
+          <div><span>Most successful rule</span><strong>${escapeHtml(s.mostSuccessfulRule?.name || "None yet")}</strong></div>
+          <div><span>Rules discovered</span><strong>${n((user.ruleCollection || []).length)}</strong></div>
+        </div>
+      </section>
+      <section class="profileSection">
+        <h3>Social</h3>
+        <div class="profileList">
+          <div><span>Friends</span><strong>${escapeHtml((user.social?.friends || []).join(", ") || "No friends added")}</strong></div>
+          <div><span>Favourite rivals</span><strong>${escapeHtml((user.social?.rivals || []).map((r) => r.name).join(", ") || "None yet")}</strong></div>
+          <div><span>Clubs</span><strong>${escapeHtml((user.social?.clubs || []).join(", ") || "No club")}</strong></div>
+        </div>
+        <div class="friendList">
+          ${(user.social?.friends || []).map((name) => `<div><span>${escapeHtml(name)}</span><button type="button" disabled>Challenge</button></div>`).join("") || `<div><span>No friends to challenge yet.</span></div>`}
+        </div>
+        <div class="friendRow">
+          <input id="friendUsername" placeholder="Friend username" maxlength="16" autocomplete="off" />
+          <button id="addFriendBtn" type="button">Add friend</button>
+        </div>
+      </section>
+      <section class="profileSection">
+        <h3>Performance Insights</h3>
+        ${renderInsights(user)}
+      </section>
+    </div>
+  `;
+}
+
+function renderStatsTab(user, winRate) {
+  const s = user.stats || {};
+  return `
+    <div class="profileGrid">
+      <section class="profileSection wide">
+        <h3>Stats Dashboard</h3>
+        <div class="profileStats">
+          ${statTile("games played", n(s.gamesPlayed))}
+          ${statTile("wins", n(s.wins))}
+          ${statTile("losses", n(s.losses))}
+          ${statTile("draws", n(s.draws))}
+          ${statTile("win rate", `${winRate}%`)}
+          ${statTile("coins", n(s.coins))}
+          ${statTile("coins earned", n(s.coinsEarned))}
+          ${statTile("coins spent", n(s.coinsSpent))}
+          ${statTile("avg game length", `${n(s.averageGameLength)} turns`)}
+          ${statTile("checkmates", n(s.checkmatesDelivered))}
+          ${statTile("captures", n(s.capturesMade))}
+          ${statTile("highest winstreak", n(s.highestWinstreak))}
+          ${statTile("rules survived", n(s.rulesSurvived))}
+          ${statTile("extra moves", n(s.extraMovesEarned))}
+          ${statTile("kings exploded", n(s.kingsExploded))}
+          ${statTile("queens sacrificed", n(s.queensSacrificed))}
+          ${statTile("pawns promoted", n(s.pawnsPromoted))}
+          ${statTile("lava deaths", n(s.lavaDeaths))}
+        </div>
+      </section>
+      <section class="profileSection">
+        <h3>Rank</h3>
+        <div class="profileList">
+          <div><span>Current rating</span><strong>${n(user.rank?.rating || 1000)}</strong></div>
+          <div><span>League tier</span><strong>${escapeHtml(user.rank?.tier || "Bronze")}</strong></div>
+          <div><span>Peak rating</span><strong>${n(user.rank?.peakRating || 1000)}</strong></div>
+        </div>
+      </section>
+      <section class="profileSection">
+        <h3>Performance</h3>
+        ${renderInsights(user)}
+      </section>
+    </div>
+  `;
+}
+
+function renderHistoryTab(user) {
+  const matches = user.matchHistory || [];
+  if (!matches.length) return `<section class="profileSection wide"><h3>Match History</h3><div class="emptyServers">No completed matches yet.</div></section>`;
+  return `
+    <section class="profileSection wide">
+      <h3>Recent Matches</h3>
+      <div class="historyTable">
+        <div class="historyHead"><span>Opponent</span><span>Result</span><span>Rating</span><span>Duration</span></div>
+        ${matches
+          .map(
+            (m) => `
+              <details class="historyRow">
+                <summary>
+                  <span>${escapeHtml(m.opponent || "Opponent")}</span>
+                  <span class="result-${String(m.result || "").toLowerCase()}">${escapeHtml(m.result || "-")}</span>
+                  <span>${Number(m.ratingChange || 0) >= 0 ? "+" : ""}${n(m.ratingChange)} / +${n(m.coinsEarned)} coins</span>
+                  <span>${msDuration(m.durationMs)}</span>
+                </summary>
+                <div class="matchDetail">
+                  <div>${escapeHtml(m.detail || "")}</div>
+                  <div><strong>Replay:</strong> ${m.replay ? "Available" : "Not recorded yet"}</div>
+                  <div><strong>Activated rules:</strong> ${escapeHtml((m.activatedRules || []).join(", ") || "None recorded")}</div>
+                  <div><strong>Move list:</strong> ${escapeHtml((m.moveList || []).join(" "))}</div>
+                </div>
+              </details>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderRulesTab(user) {
+  const rules = user.ruleCollection || [];
+  return `
+    <section class="profileSection wide">
+      <h3>Rule Collection</h3>
+      <div class="profileStats">
+        ${statTile("rules discovered", n(rules.length))}
+        ${statTile("rare cards", n(rules.filter((r) => r.rare).length))}
+        ${statTile("card backs", "1")}
+      </div>
+      <div class="ruleMasteryGrid">
+        ${
+          rules.length
+            ? rules
+                .map(
+                  (r) => `
+                    <div class="ruleMasteryCard">
+                      <strong>${escapeHtml(r.name)}</strong>
+                      <span>Lv${n(r.mastery)} &middot; Used ${n(r.used)} time(s)</span>
+                      <span>Win rate ${n(r.winRate)}%</span>
+                    </div>
+                  `
+                )
+                .join("")
+            : `<div class="emptyServers">Pick rule cards in matches to discover them here.</div>`
+        }
+      </div>
+      <div class="row gap" style="margin-top: 10px;">
+        <button id="profileRulebookBtn" type="button">View all rule cards</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderAchievementsTab(user) {
+  const achievements = user.achievements || [];
+  return `
+    <section class="profileSection wide">
+      <div class="shopHeader">
+        <h3>Achievements</h3>
+        <div class="coinBalance">${n(user.stats?.coins)} coins</div>
+      </div>
+      <div class="achievementGrid">
+        ${achievements
+          .map((a) => {
+            const progress = Math.max(0, Math.min(100, Math.round(((a.progress || 0) / Math.max(1, a.target || 1)) * 100)));
+            return `
+              <div class="achievement ${a.unlocked ? "unlocked" : ""}">
+                <strong>${escapeHtml(a.name)}</strong>
+                <span>${escapeHtml(a.description)}</span>
+                <div class="rankProgress"><span style="width: ${progress}%"></span></div>
+                <small>${n(a.progress)} / ${n(a.target)} &middot; ${n(a.reward)} coins ${a.claimed ? "claimed" : "reward"}</small>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderCosmeticsTab(user) {
+  const cosmetics = user.cosmetics || {};
+  return `
+    <section class="profileSection wide">
+      <div class="shopHeader">
+        <h3>Cosmetics / Shop</h3>
+        <div class="coinBalance">${n(user.stats?.coins)} coins</div>
+      </div>
+      <div class="cosmeticGrid">
+        ${Object.entries(cosmetics)
+          .map(
+            ([group, items]) => `
+              <div class="cosmeticGroup">
+                <h3>${escapeHtml(group.replace(/([A-Z])/g, " $1"))}</h3>
+                ${(items || [])
+                  .map(
+                    (item) => `
+                      <div class="cosmeticItem ${item.unlocked ? "unlocked" : "locked"}">
+                        <span>${escapeHtml(item.label || item.name)}</span>
+                        <strong>${item.selected ? "Equipped" : item.unlocked ? "Owned" : `${n(item.price)} coins`}</strong>
+                        ${
+                          item.unlocked
+                            ? ""
+                            : `<button class="buyCosmeticBtn" type="button" data-buy-group="${escapeAttr(group)}" data-buy-name="${escapeAttr(item.name)}" ${item.affordable ? "" : "disabled"}>Buy</button>`
+                        }
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function cosmeticOptions(user, group, selected) {
+  const items = (user.cosmetics?.[group] || []).filter((item) => item.unlocked);
+  return items
+    .map((item) => {
+      const value = item.name;
+      const label = item.label || item.name;
+      return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+}
+
+function renderSettingsTab(user) {
+  const p = user.profile || {};
+  return `
+    <section class="profileSection wide">
+      <h3>Settings</h3>
+      <div class="settingsGrid">
+        <div class="fieldStack"><label for="settingsUsername">Username</label><input id="settingsUsername" maxlength="16" value="${escapeAttr(user.username)}" /></div>
+        <div class="fieldStack"><label for="settingsAvatar">Avatar / icon</label><select id="settingsAvatar">${cosmeticOptions(user, "avatars", p.avatar)}</select></div>
+        <div class="fieldStack"><label for="settingsBanner">Banner</label><select id="settingsBanner">${cosmeticOptions(user, "banners", p.banner)}</select></div>
+        <div class="fieldStack"><label for="settingsCountry">Country / region</label><input id="settingsCountry" maxlength="32" value="${escapeAttr(p.country || "")}" /></div>
+        <div class="fieldStack wide"><label for="settingsBio">Short bio</label><input id="settingsBio" maxlength="160" value="${escapeAttr(p.bio || "")}" /></div>
+        <div class="fieldStack"><label for="settingsBoardSkin">Chessboard skin</label><select id="settingsBoardSkin">${cosmeticOptions(user, "boardSkins", p.boardSkin)}</select></div>
+        <div class="fieldStack"><label for="settingsPieceSkin">Piece skin</label><select id="settingsPieceSkin">${cosmeticOptions(user, "pieceSkins", p.pieceSkin)}</select></div>
+        <div class="fieldStack"><label for="settingsBorder">Animated border</label><select id="settingsBorder">${cosmeticOptions(user, "borders", p.border)}</select></div>
+        <div class="fieldStack"><label for="settingsEmote">Emote</label><select id="settingsEmote">${cosmeticOptions(user, "emotes", p.emote)}</select></div>
+        <div class="fieldStack"><label for="settingsCardBack">Card back</label><select id="settingsCardBack">${cosmeticOptions(user, "cardBacks", p.cardBack)}</select></div>
+      </div>
+      <div id="settingsStatus" class="modalStatus"></div>
+      <div class="modalActions"><button id="saveProfileBtn" class="primaryBtn" type="button">Save profile</button></div>
+    </section>
+    <section class="profileSection wide dangerZone">
+      <h3>Password</h3>
+      <div class="settingsGrid">
+        <div class="fieldStack"><label for="currentPassword">Current password</label><input id="currentPassword" type="password" autocomplete="current-password" /></div>
+        <div class="fieldStack"><label for="nextPassword">New password</label><input id="nextPassword" type="password" autocomplete="new-password" /></div>
+      </div>
+      <div id="passwordStatus" class="modalStatus"></div>
+      <div class="modalActions"><button id="changePasswordBtn" type="button">Change password</button></div>
+    </section>
+    <section class="profileSection wide dangerZone">
+      <h3>Account</h3>
+      <div class="modalActions">
+        <button id="logoutBtn" type="button">Log out</button>
+        <button id="deleteAccountBtn" class="dangerBtn" type="button">Delete account</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderInsights(user) {
+  const i = user.insights || {};
+  return `
+    <div class="profileList">
+      <div><span>Win rate as White</span><strong>${n(i.whiteWinRate)}%</strong></div>
+      <div><span>Win rate as Black</span><strong>${n(i.blackWinRate)}%</strong></div>
+      <div><span>Best opening style</span><strong>${escapeHtml(i.bestOpeningStyle || "Not enough data")}</strong></div>
+      <div><span>Strongest time of day</span><strong>${escapeHtml(i.strongestTimeOfDay || "Not enough data")}</strong></div>
+      <div><span>Rule win rates</span><strong>${escapeHtml(i.bestRuleWinRate || "No rule wins yet")}</strong></div>
+      <div><span>Average blunder rate</span><strong>${escapeHtml(i.averageBlunderRate || "Not tracked yet")}</strong></div>
+    </div>
+  `;
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/"/g, "&quot;");
+}
+
+async function logout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}" });
+  } catch {
+    // ignore
+  }
+  state.authToken = null;
+  state.account = null;
+  saveAccountSession();
+  renderAccountUI();
+  closeProfileModal();
+}
+
+function profileValue(id) {
+  return document.getElementById(id)?.value || "";
+}
+
+async function saveProfileSettings() {
+  const status = document.getElementById("settingsStatus");
+  if (status) status.textContent = "";
+  try {
+    const res = await fetch("/api/me", {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: profileValue("settingsUsername"),
+        avatar: profileValue("settingsAvatar"),
+        banner: profileValue("settingsBanner"),
+        country: profileValue("settingsCountry"),
+        bio: profileValue("settingsBio"),
+        boardSkin: profileValue("settingsBoardSkin"),
+        pieceSkin: profileValue("settingsPieceSkin"),
+        border: profileValue("settingsBorder"),
+        emote: profileValue("settingsEmote"),
+        cardBack: profileValue("settingsCardBack"),
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Save failed.");
+    state.account = json.user;
+    saveAccountSession();
+    renderAccountUI();
+    renderProfile();
+  } catch (err) {
+    if (status) status.textContent = err.message || "Save failed.";
+  }
+}
+
+async function changePassword() {
+  const status = document.getElementById("passwordStatus");
+  if (status) status.textContent = "";
+  try {
+    const res = await fetch("/api/me/password", {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        currentPassword: profileValue("currentPassword"),
+        nextPassword: profileValue("nextPassword"),
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Password change failed.");
+    if (status) status.textContent = "Password changed.";
+    const current = document.getElementById("currentPassword");
+    const next = document.getElementById("nextPassword");
+    if (current) current.value = "";
+    if (next) next.value = "";
+  } catch (err) {
+    if (status) status.textContent = err.message || "Password change failed.";
+  }
+}
+
+async function addFriend() {
+  const input = document.getElementById("friendUsername");
+  const username = input?.value.trim() || "";
+  if (!username) return;
+  try {
+    const res = await fetch("/api/me/friends", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Add friend failed.");
+    state.account = json.user;
+    saveAccountSession();
+    renderProfile();
+  } catch (err) {
+    logLine(`<strong>Profile</strong>: ${escapeHtml(err.message || "Add friend failed.")}`);
+  }
+}
+
+async function buyCosmetic(group, name) {
+  try {
+    const res = await fetch("/api/me/shop/buy", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ group, name }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Purchase failed.");
+    state.account = json.user;
+    saveAccountSession();
+    renderAccountUI();
+    renderProfile();
+  } catch (err) {
+    logLine(`<strong>Shop</strong>: ${escapeHtml(err.message || "Purchase failed.")}`);
+  }
+}
+
+async function deleteAccount() {
+  if (!confirm("Delete this account permanently?")) return;
+  try {
+    await fetch("/api/me", { method: "DELETE", headers: authHeaders() });
+  } catch {
+    // ignore
+  }
+  state.authToken = null;
+  state.account = null;
+  saveAccountSession();
+  renderAccountUI();
+  closeProfileModal();
+}
+
 function updateBodyState() {
   document.body.classList.toggle("is-connected", state.connected);
   document.body.classList.toggle("is-in-game", !!state.lobby);
@@ -278,7 +899,10 @@ function updateBodyState() {
   }
 }
 
+loadAccountSession();
 loadSession();
+renderAccountUI();
+refreshAccount();
 
 function logLine(html) {
   const div = document.createElement("div");
@@ -1890,6 +2514,7 @@ function requestOpenServers() {
 }
 
 function openCreateModal() {
+  if (!ensureSignedIn()) return;
   if (!els.createModal) return;
   els.createModal.hidden = false;
 }
@@ -1900,10 +2525,12 @@ function closeCreateModal() {
 }
 
 function createLobby(visibility) {
-  socket.emit("lobby:create", { name: els.name.value.trim(), visibility }, (res) => {
+  if (!ensureSignedIn()) return;
+  socket.emit("lobby:create", { authToken: state.authToken, visibility }, (res) => {
     if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "create failed")}`);
     closeCreateModal();
     enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
+    refreshAccount();
     els.code.value = "";
     const visibilityText = visibility === "public" ? "public" : "private";
     logLine(`<strong>Lobby</strong>: Created ${visibilityText} lobby <strong>${res.code}</strong>`);
@@ -1911,15 +2538,18 @@ function createLobby(visibility) {
 }
 
 function createSingleplayer() {
-  socket.emit("lobby:singleplayer", { name: els.name.value.trim() }, (res) => {
+  if (!ensureSignedIn()) return;
+  socket.emit("lobby:singleplayer", { authToken: state.authToken }, (res) => {
     if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "singleplayer failed")}`);
     enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
+    refreshAccount();
     els.code.value = "";
     logLine(`<strong>Lobby</strong>: Started singleplayer game against Chaos Bot.`);
   });
 }
 
 function openJoinModal() {
+  if (!ensureSignedIn()) return;
   if (!els.joinModal) return;
   els.joinModal.hidden = false;
   requestOpenServers();
@@ -1932,15 +2562,17 @@ function closeJoinModal() {
 }
 
 function joinLobbyCode(code) {
+  if (!ensureSignedIn()) return;
   const normalized = String(code || "").trim().toUpperCase();
   if (!normalized) return logLine(`<strong>Error</strong>: Enter a lobby code.`);
-  socket.emit("lobby:join", { code: normalized, name: els.name.value.trim() }, (res) => {
+  socket.emit("lobby:join", { code: normalized, authToken: state.authToken }, (res) => {
     if (!res?.ok) {
       requestOpenServers();
       return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "join failed")}`);
     }
     closeJoinModal();
     enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
+    refreshAccount();
     logLine(`<strong>Lobby</strong>: Joined <strong>${res.code}</strong>`);
   });
 }
@@ -2164,6 +2796,13 @@ socket.on("game:state", (s) => {
   state.lastRematchId = s.rematchId ?? state.lastRematchId;
   state.serverState = s;
   state.lastStateAt = Date.now();
+  if (s?.resultInfo && state.authToken) {
+    const resultKey = `${s.rematchId || 0}:${s.resultInfo.winner || ""}:${s.resultInfo.loser || ""}:${s.resultInfo.reason || ""}`;
+    if (state.lastProfileResultKey !== resultKey) {
+      state.lastProfileResultKey = resultKey;
+      refreshAccount();
+    }
+  }
   handleEffects();
   syncUI();
 });
@@ -2181,6 +2820,50 @@ els.rulebookCloseBtn?.addEventListener("click", () => {
 });
 els.rulebookModal?.addEventListener("mousedown", (ev) => {
   if (ev.target === els.rulebookModal) closeRulebook();
+});
+
+els.profileBtn?.addEventListener("click", () => openProfileModal());
+els.accountActionBtn?.addEventListener("click", () => openProfileModal());
+els.profileCloseBtn?.addEventListener("click", () => closeProfileModal());
+els.profileModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.profileModal) closeProfileModal();
+});
+els.profileTabs?.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-tab]");
+  if (!btn) return;
+  state.profileTab = btn.dataset.tab || "overview";
+  renderProfile();
+});
+els.profileContent?.addEventListener("click", (ev) => {
+  const target = ev.target;
+  if (target?.id === "logoutBtn") logout();
+  if (target?.id === "saveProfileBtn") saveProfileSettings();
+  if (target?.id === "changePasswordBtn") changePassword();
+  if (target?.id === "addFriendBtn") addFriend();
+  if (target?.id === "deleteAccountBtn") deleteAccount();
+  if (target?.id === "profileRulebookBtn") openRulebook();
+  const buyBtn = target?.closest?.(".buyCosmeticBtn");
+  if (buyBtn) buyCosmetic(buyBtn.dataset.buyGroup, buyBtn.dataset.buyName);
+});
+
+els.authCloseBtn?.addEventListener("click", () => closeAuthModal());
+els.authModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.authModal) closeAuthModal();
+});
+els.loginTabBtn?.addEventListener("click", () => {
+  state.authMode = "login";
+  renderAuthMode();
+});
+els.signupTabBtn?.addEventListener("click", () => {
+  state.authMode = "signup";
+  renderAuthMode();
+});
+els.authSubmitBtn?.addEventListener("click", () => submitAuth());
+els.authUsername?.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") submitAuth();
+});
+els.authPassword?.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") submitAuth();
 });
 
 els.createBtn.addEventListener("click", () => {
