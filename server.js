@@ -330,10 +330,32 @@ function botTargetSquares(game, pending) {
   for (let sq = 0; sq < 64; sq++) {
     const p = game.state.board[sq];
     if (!p || p.color !== color || p.color === "x") continue;
+    if (pending?.ruleId === "inst_pawn_soldier" && p.type !== "p") continue;
     if (pending?.ruleId === "inst_backup_plan" && p.type === "k") continue;
     squares.push(sq);
   }
   return shuffled(squares);
+}
+
+function botPawnSoldierTarget(game, pending) {
+  const color = pending?.color;
+  const from = pending?.from;
+  if (color !== "w" && color !== "b") return Math.floor(Math.random() * 64);
+
+  const enemies = [];
+  for (let sq = 0; sq < 64; sq++) {
+    const p = game.state.board[sq];
+    if (!p || p.color !== other(color) || p.type === "k") continue;
+    enemies.push(sq);
+  }
+  if (!enemies.length) return Math.floor(Math.random() * 64);
+  if (from == null) return randItem(enemies);
+  enemies.sort((a, b) => {
+    const da = Math.abs(idxToFile(a) - idxToFile(from)) + Math.abs(idxToRank(a) - idxToRank(from));
+    const db = Math.abs(idxToFile(b) - idxToFile(from)) + Math.abs(idxToRank(b) - idxToRank(from));
+    return da - db;
+  });
+  return enemies[0];
 }
 
 function runBotAction(roomCode) {
@@ -381,6 +403,11 @@ function runBotAction(roomCode) {
         }
       }
     }
+  } else if (game.phase === "pawnSoldierShot") {
+    const pending = game.pendingPawnSoldierShot;
+    if (pending?.playerId === bot.id) {
+      changed = !!game.submitPawnSoldierShot(bot.id, botPawnSoldierTarget(game, pending))?.ok;
+    }
   } else if (game.phase === "rps" && game.rps) {
     const color = game.playerColor(bot.id);
     if (color && !game.rps.byColor?.[color]) {
@@ -400,7 +427,7 @@ function runBotAction(roomCode) {
   }
 
   if (changed) pushEffectsAndState(roomCode);
-  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule"].includes(game.phase)) scheduleBotTurn(roomCode);
+  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "pawnSoldierShot"].includes(game.phase)) scheduleBotTurn(roomCode);
 }
 
 function scheduleBotTurn(roomCode) {
@@ -586,6 +613,19 @@ io.on("connection", (socket) => {
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
     touchPlayerSocket({ code, entry, playerId: pid, socket });
     const res = game.submitRuleTarget(pid, square);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:pawnSoldierShot", ({ code, playerId, target } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.submitPawnSoldierShot(pid, target);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
     pushEffectsAndState(code);

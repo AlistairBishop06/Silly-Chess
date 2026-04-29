@@ -5,6 +5,12 @@
 // - apply(game, ctx): performs immediate board/state changes
 // - modifiers(game): returns modifiers applied while active (duration or permanent flags)
 
+
+
+//- pawn with gun
+//- bounty
+//- home extension
+//- make card popup slide
 const { pieceValue, idxToFile, idxToRank, toIdx } = require("../ChessEngine");
 
 function randInt(n) {
@@ -452,6 +458,25 @@ const RULES = [
     apply(game) {
       game.resetBoardState?.({ keepRules: true });
       game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Soft Reset! Pieces returned to start while active rules stayed in play." });
+    },
+  },
+  {
+    id: "inst_pawn_soldier",
+    kind: "instant",
+    name: "Pawn Soldier",
+    description: "Choose one of your pawns. It gets an AK-47; after it next moves, click a board square to fire 3 shots in that direction. Hit pieces reveal HP and lose 1 HP per bullet.",
+    apply(game, ctx) {
+      const hasPawn = game.state.board.some((p) => p?.color === ctx?.color && p.type === "p");
+      if (!hasPawn) {
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: "Pawn Soldier fizzled: no pawn was available." });
+        return;
+      }
+      game.enqueueTargetRule?.({
+        ruleId: "inst_pawn_soldier",
+        playerId: ctx?.playerId,
+        color: ctx?.color,
+        prompt: "Choose one of your pawns to arm as a pawn soldier.",
+      });
     },
   },
   {

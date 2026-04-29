@@ -15,10 +15,21 @@ function cloneSet(set) {
 }
 
 function serializeBoard(board) {
-  return board.map((p) => (p ? { type: p.type, color: p.color, tags: p.tags } : null));
+  return board.map((p) =>
+    p
+      ? {
+          type: p.type,
+          color: p.color,
+          tags: p.tags,
+          hp: typeof p._hp === "number" ? p._hp : null,
+          maxHp: typeof p._maxHp === "number" ? p._maxHp : null,
+        }
+      : null
+  );
 }
 
 const DEMOTE_TYPE = { q: "r", r: "b", b: "n", n: "p", p: "p" };
+const PAWN_SOLDIER_HP = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 
 function defaultPermanentFlags() {
   return {
@@ -81,7 +92,7 @@ class Game {
 
     this.state = initialState();
     this.ply = 0;
-    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "rps" | "wager"
+    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "pawnSoldierShot" | "rps" | "wager"
 
     this.result = null;
     this.resultInfo = null;
@@ -117,6 +128,7 @@ class Game {
     this.requestTimeReverse = 0;
     this.history = [];
     this.pendingTargetRules = [];
+    this.pendingPawnSoldierShot = null;
     this.backupPlanActive = { w: false, b: false };
 
     // Mini-games.
@@ -178,6 +190,7 @@ class Game {
     this.trailBlocks = [];
     this.requestTimeReverse = 0;
     this.pendingTargetRules = [];
+    this.pendingPawnSoldierShot = null;
     this.backupPlanActive = { w: false, b: false };
     this.ghostSquares = new Set();
     this.stickySquares = new Set();
@@ -227,6 +240,7 @@ class Game {
     let res = { ok: false, error: "Unknown targeted rule" };
     if (pending.ruleId === "inst_titan") res = this.makeTitan(square, pending.color);
     if (pending.ruleId === "inst_suicide_bomber") res = this.armSuicideBomber(square, pending.color);
+    if (pending.ruleId === "inst_pawn_soldier") res = this.armPawnSoldier(square, pending.color);
     if (pending.ruleId === "inst_backup_plan") res = this.assignBackupVital(square, pending.color);
     if (!res.ok) return res;
 
@@ -320,6 +334,83 @@ class Game {
     if (!piece || piece.color !== color || piece.color === "x") return { ok: false, error: "Choose one of your own pieces" };
     piece.tags = [...new Set([...(piece.tags || []), "suicideBomber"])];
     this.effects.push({ type: "rule", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} armed a suicide bomber.` });
+    return { ok: true };
+  }
+
+  armPawnSoldier(square, color) {
+    const piece = this.state.board[square];
+    if (!piece || piece.color !== color || piece.color === "x" || piece.type !== "p") return { ok: false, error: "Choose one of your pawns" };
+    piece.tags = [...new Set([...(piece.tags || []), "pawnSoldier"])];
+    this.effects.push({ type: "rule", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} armed a pawn soldier.` });
+    return { ok: true };
+  }
+
+  firstPawnSoldierHitSquare(from, target) {
+    if (from == null || target == null || from === target) return null;
+    const fromFile = idxToFile(from);
+    const fromRank = idxToRank(from);
+    const targetFile = idxToFile(target);
+    const targetRank = idxToRank(target);
+    const df = targetFile - fromFile;
+    const dr = targetRank - fromRank;
+    const steps = Math.max(Math.abs(df), Math.abs(dr)) * 20;
+    if (steps <= 0) return null;
+
+    const seen = new Set([from]);
+    for (let i = 1; i <= steps; i++) {
+      const file = Math.round(fromFile + (df * i) / steps);
+      const rank = Math.round(fromRank + (dr * i) / steps);
+      if (file < 0 || file > 7 || rank < 0 || rank > 7) continue;
+      const sq = toIdx(file, rank);
+      if (seen.has(sq)) continue;
+      seen.add(sq);
+      const p = this.state.board[sq];
+      if (!p || p.color === "x" || p.type === "k") continue;
+      if (!PAWN_SOLDIER_HP[p.type]) continue;
+      return sq;
+    }
+    return null;
+  }
+
+  applyPawnSoldierDamage(square) {
+    const piece = this.state.board[square];
+    if (!piece || piece.color === "x" || piece.type === "k") return false;
+    const maxHp = PAWN_SOLDIER_HP[piece.type];
+    if (!maxHp) return false;
+    piece._maxHp = piece._maxHp || maxHp;
+    piece._hp = typeof piece._hp === "number" ? piece._hp : piece._maxHp;
+    piece._hp -= 1;
+    if (piece._hp <= 0) {
+      this.state.board[square] = null;
+      this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [square], reason: "pawnSoldier" });
+    }
+    return true;
+  }
+
+  submitPawnSoldierShot(playerId, target) {
+    if (this.phase !== "pawnSoldierShot" || !this.pendingPawnSoldierShot) return { ok: false, error: "No pawn soldier shot is waiting" };
+    const pending = this.pendingPawnSoldierShot;
+    if (pending.playerId !== playerId) return { ok: false, error: "Waiting for the other player to shoot" };
+    if (target == null || target < 0 || target > 63) return { ok: false, error: "Bad shot target" };
+
+    const hits = [];
+    for (let i = 0; i < 3; i++) {
+      const hit = this.firstPawnSoldierHitSquare(pending.from, target);
+      if (hit == null) continue;
+      if (this.applyPawnSoldierDamage(hit)) hits.push(hit);
+    }
+
+    this.effects.push({ type: "bullets", id: this.nextEffectId(), from: pending.from, to: target, hits });
+    this.effects.push({
+      type: "log",
+      id: this.nextEffectId(),
+      text: `Pawn Soldier fired 3 shot(s)${hits.length ? ` and hit ${hits.length} time(s).` : "."}`,
+    });
+
+    this.pendingPawnSoldierShot = null;
+    this.phase = "play";
+    this.evaluateGameEnd();
+    if (this.phase === "play") this.maybeStartRuleChoice();
     return { ok: true };
   }
 
@@ -1414,6 +1505,7 @@ class Game {
     const piece = this.state.board[from];
     if (!piece || piece.color !== color) return { ok: false, error: "No piece" };
     if (piece._stickyLocked) return { ok: false, error: "That piece is stuck this turn" };
+    const pawnSoldierWasArmed = piece.tags?.includes("pawnSoldier");
 
     const mods = this.currentModifiers();
     if (this.isTitan(piece)) {
@@ -1635,7 +1727,14 @@ class Game {
 
     this.ruleManager.tickAfterPly();
     this.evaluateGameEnd();
-    this.maybeStartRuleChoice();
+    const pawnSoldier = this.state.board[finalTo];
+    if (!this.result && pawnSoldierWasArmed && pawnSoldier?.color === color && pawnSoldier.tags?.includes("pawnSoldier")) {
+      pawnSoldier.tags = pawnSoldier.tags.filter((tag) => tag !== "pawnSoldier");
+      this.pendingPawnSoldierShot = { playerId, color, from: finalTo };
+      this.phase = "pawnSoldierShot";
+    } else {
+      this.maybeStartRuleChoice();
+    }
     return { ok: true };
   }
 
@@ -1724,6 +1823,13 @@ class Game {
             playerId: pendingTarget.playerId,
             color: pendingTarget.color,
             prompt: pendingTarget.prompt,
+          }
+        : null,
+      pendingPawnSoldierShot: this.pendingPawnSoldierShot
+        ? {
+            playerId: this.pendingPawnSoldierShot.playerId,
+            color: this.pendingPawnSoldierShot.color,
+            from: this.pendingPawnSoldierShot.from,
           }
         : null,
       rps: this.rps

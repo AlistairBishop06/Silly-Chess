@@ -78,6 +78,7 @@ const state = {
   particles: [],
   animations: [],
   lawnmowers: [],
+  bullets: [],
   lastEffectsSeen: new Set(),
   lastChoiceKey: null,
   lastStateAt: 0,
@@ -743,6 +744,7 @@ function draw() {
   for (const { sq, p } of titans) drawTitanPiece(sq, p);
   drawLawnmowers(t);
   drawAnimations(t);
+  drawBullets(t);
 
   // Particles.
   const next = [];
@@ -787,6 +789,10 @@ function draw() {
         ? s.pendingTargetRule?.playerId === state.playerId
           ? (s.pendingTargetRule.prompt || "Choose a target")
           : "Opponent choosing a rule target"
+      : s.phase === "pawnSoldierShot"
+        ? s.pendingPawnSoldierShot?.playerId === state.playerId
+          ? "Click a square to fire"
+          : "Opponent firing"
       : s.phase === "rps"
         ? "RPS Duel!"
       : s.phase === "wager"
@@ -867,6 +873,58 @@ function drawAnimations(t) {
     if (p < 1) next.push(anim);
   }
   state.animations = next;
+}
+
+function queueBullets(effect) {
+  if (effect.from == null || effect.to == null) return;
+  const now = nowMs();
+  for (let i = 0; i < 3; i++) {
+    state.bullets.push({
+      from: effect.from,
+      to: effect.to,
+      start: now + i * 85,
+      end: now + i * 85 + 240,
+      hit: (effect.hits || [])[i] ?? null,
+    });
+  }
+}
+
+function drawBullets(t) {
+  const next = [];
+  const size = els.canvas.width / 8;
+  for (const bullet of state.bullets) {
+    if (t < bullet.start) {
+      next.push(bullet);
+      continue;
+    }
+    const p = Math.min(1, Math.max(0, (t - bullet.start) / Math.max(1, bullet.end - bullet.start)));
+    const a = squareToCanvasCenter(bullet.from);
+    const endSq = bullet.hit != null ? bullet.hit : bullet.to;
+    const b = squareToCanvasCenter(endSq);
+    const headX = a.x + (b.x - a.x) * p;
+    const headY = a.y + (b.y - a.y) * p;
+    const tailP = Math.max(0, p - 0.22);
+    const tailX = a.x + (b.x - a.x) * tailP;
+    const tailY = a.y + (b.y - a.y) * tailP;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 221, 87, 0.95)";
+    ctx.lineWidth = Math.max(3, size * 0.045);
+    ctx.shadowColor = "rgba(255, 221, 87, 0.9)";
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.moveTo(tailX, tailY);
+    ctx.lineTo(headX, headY);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255, 255, 220, 0.95)";
+    ctx.beginPath();
+    ctx.arc(headX, headY, Math.max(2, size * 0.035), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    if (p < 1) next.push(bullet);
+  }
+  state.bullets = next;
 }
 
 function queueLawnmower(effect) {
@@ -979,6 +1037,28 @@ function drawPieceAt(x, y, p, sq = null) {
     ctx.strokeText("\u{1F4A3}", x + size * 0.25, y - size * 0.25);
     ctx.fillText("\u{1F4A3}", x + size * 0.25, y - size * 0.25);
   }
+  if (p.tags?.includes("pawnSoldier")) {
+    ctx.save();
+    ctx.translate(x + size * 0.18, y + size * 0.06);
+    ctx.rotate(p.color === "w" ? -0.28 : 0.28);
+    ctx.strokeStyle = "#151923";
+    ctx.fillStyle = "#151923";
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(2, size * 0.045);
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.17, 0);
+    ctx.lineTo(size * 0.24, 0);
+    ctx.stroke();
+    ctx.lineWidth = Math.max(2, size * 0.035);
+    ctx.beginPath();
+    ctx.moveTo(size * 0.04, 0);
+    ctx.lineTo(size * 0.04, size * 0.16);
+    ctx.moveTo(-size * 0.06, 0);
+    ctx.lineTo(-size * 0.12, size * 0.12);
+    ctx.stroke();
+    ctx.fillRect(size * 0.22, -size * 0.025, size * 0.12, size * 0.05);
+    ctx.restore();
+  }
   if (sq != null && state.serverState?.backupVitalSquare === sq) {
     ctx.font = `${Math.floor(size * 0.2)}px "Segoe UI Symbol", "Noto Color Emoji", sans-serif`;
     ctx.fillStyle = "#ff4f8b";
@@ -986,6 +1066,20 @@ function drawPieceAt(x, y, p, sq = null) {
     ctx.lineWidth = 2;
     ctx.strokeText("\u2665", x - size * 0.26, y - size * 0.27);
     ctx.fillText("\u2665", x - size * 0.26, y - size * 0.27);
+  }
+  if (sq != null && p.maxHp && p.hp != null) {
+    const w = size * 0.58;
+    const h = Math.max(4, size * 0.065);
+    const pct = Math.max(0, Math.min(1, p.hp / p.maxHp));
+    const bx = x - w / 2;
+    const by = y - size * 0.46;
+    ctx.fillStyle = "rgba(10, 12, 18, 0.72)";
+    ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = pct > 0.5 ? "#7dffb3" : pct > 0.25 ? "#ffd166" : "#ff5c7a";
+    ctx.fillRect(bx, by, w * pct, h);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, w, h);
   }
 }
 
@@ -1072,6 +1166,7 @@ function ruleArtIcon(ruleId, ruleName) {
   if (hay.includes("fog") || hay.includes("invisible")) return "\u25D0";
   if (hay.includes("lightning") || hay.includes("orbital")) return "\u26A1";
   if (hay.includes("asteroid")) return "\u25C6";
+  if (hay.includes("pawn soldier")) return "\u25CE";
   if (hay.includes("suicide bomber")) return "\u{1F4A3}";
   if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "\u{1F4A5}";
   if (hay.includes("titan")) return "\u{1F4AA}";
@@ -1580,6 +1675,7 @@ function syncUI() {
     stopConfetti();
     if (els.sideLabelTop) els.sideLabelTop.textContent = "";
     if (els.sideLabelBottom) els.sideLabelBottom.textContent = "";
+    els.canvas.style.cursor = "";
     return;
   }
 
@@ -1597,6 +1693,12 @@ function syncUI() {
         ? s.pendingTargetRule.prompt || "Choose a rule target"
         : "Opponent choosing a rule target";
   }
+  if (s.phase === "pawnSoldierShot") {
+    els.gameMsg.textContent =
+      s.pendingPawnSoldierShot?.playerId === state.playerId
+        ? "Pawn Soldier: click a square to fire"
+        : "Opponent firing Pawn Soldier";
+  }
 
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
 
@@ -1605,6 +1707,8 @@ function syncUI() {
   const topIsWhite = !!state.flipVisual;
   if (els.sideLabelTop) els.sideLabelTop.textContent = topIsWhite ? whiteName : blackName;
   if (els.sideLabelBottom) els.sideLabelBottom.textContent = topIsWhite ? blackName : whiteName;
+  els.canvas.style.cursor =
+    s.phase === "pawnSoldierShot" && s.pendingPawnSoldierShot?.playerId === state.playerId ? "crosshair" : "";
 
   renderCards();
   renderChoice();
@@ -1658,6 +1762,10 @@ function handleEffects() {
       if (e.style === "teleport") spawnParticles([e.from, e.to].filter((sq) => sq != null), "rgba(196,141,255,0.92)");
       if (e.style === "fan") spawnParticles([e.to].filter((sq) => sq != null), "rgba(123,211,255,0.72)");
       if (e.style === "ice") spawnParticles([e.to].filter((sq) => sq != null), "rgba(220,250,255,0.84)");
+    }
+    if (e.type === "bullets") {
+      queueBullets(e);
+      spawnParticles(e.hits || [], "rgba(255,221,87,0.9)");
     }
     if (e.type === "lawnmower") {
       queueLawnmower(e);
@@ -1818,6 +1926,16 @@ els.canvas.addEventListener("mousedown", (ev) => {
     const square = canvasToSquare(ev.clientX, ev.clientY);
     socket.emit("game:ruleTarget", { code: state.lobby, playerId: state.playerId, square }, (res) => {
       if (!res?.ok) logLine(`<strong>Target</strong>: ${escapeHtml(res?.error || "target rejected")}`);
+      socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+    });
+    return;
+  }
+  if (s.phase === "pawnSoldierShot") {
+    const pending = s.pendingPawnSoldierShot;
+    if (!pending || pending.playerId !== state.playerId) return;
+    const target = canvasToSquare(ev.clientX, ev.clientY);
+    socket.emit("game:pawnSoldierShot", { code: state.lobby, playerId: state.playerId, target }, (res) => {
+      if (!res?.ok) logLine(`<strong>Pawn Soldier</strong>: ${escapeHtml(res?.error || "shot rejected")}`);
       socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
     });
     return;
