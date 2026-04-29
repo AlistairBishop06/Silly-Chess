@@ -58,7 +58,6 @@ const els = {
   turnInfo: document.getElementById("turnInfo"),
   plyInfo: document.getElementById("plyInfo"),
   canvas: document.getElementById("board"),
-  boardWrap: document.querySelector(".boardWrap"),
   overlayText: document.getElementById("overlayText"),
   sideLabelTop: document.getElementById("sideLabelTop"),
   sideLabelBottom: document.getElementById("sideLabelBottom"),
@@ -89,7 +88,6 @@ const els = {
   supermarketItems: document.getElementById("supermarketItems"),
   supermarketCheckoutBtn: document.getElementById("supermarketCheckoutBtn"),
   adsLayer: document.getElementById("adsLayer"),
-  emoteBtn: document.getElementById("emoteBtn"),
   log: document.getElementById("log"),
   gameMsg: document.getElementById("gameMsg"),
 };
@@ -121,7 +119,6 @@ const state = {
   supermarketItems: { p: 0, n: 0, b: 0, r: 0, q: 0 },
   supermarketKey: null,
   ads: [],
-  emoteToasts: [],
   nextAdAt: 0,
   authToken: null,
   account: null,
@@ -347,11 +344,7 @@ function renderAccountUI() {
   const signedIn = !!user;
   if (els.accountSummary) els.accountSummary.textContent = signedIn ? `Playing as ${user.username}` : "Sign up or log in to play.";
   if (els.accountActionBtn) els.accountActionBtn.textContent = signedIn ? "Profile" : "Sign in";
-  if (els.profileBtn) {
-    els.profileBtn.innerHTML = signedIn
-      ? `<span class="miniAvatar">${escapeHtml(user.profile?.avatar || user.username.slice(0, 2).toUpperCase())}</span><span>${escapeHtml(user.username)}</span>`
-      : "Sign in";
-  }
+  if (els.profileBtn) els.profileBtn.textContent = signedIn ? user.username : "Sign in";
 }
 
 function openAuthModal(mode = "login") {
@@ -460,38 +453,6 @@ function renderProfile() {
 
 function bannerClass(name) {
   return String(name || "Sunset Clash").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "sunset-clash";
-}
-
-function skinClass(name) {
-  return String(name || "default").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "default";
-}
-
-function cosmeticProfileFallback() {
-  return {
-    avatar: "CC",
-    banner: "Sunset Clash",
-    boardSkin: "Classic Chaos",
-    pieceSkin: "Standard",
-    border: "None",
-    emote: "Good game",
-    cardBack: "Classic Cards",
-  };
-}
-
-function playerByColor(color) {
-  return (state.serverState?.players || []).find((p) => p.color === color) || null;
-}
-
-function playerById(playerId) {
-  return (state.serverState?.players || []).find((p) => p.id === playerId) || null;
-}
-
-function playerProfile(player) {
-  return { ...cosmeticProfileFallback(), ...(player?.profile || {}) };
-}
-
-function localProfile() {
-  return playerProfile(playerById(state.playerId) || { profile: state.account?.profile });
 }
 
 function n(value) {
@@ -665,9 +626,6 @@ function renderRulesTab(user) {
             : `<div class="emptyServers">Pick rule cards in matches to discover them here.</div>`
         }
       </div>
-      <div class="row gap" style="margin-top: 10px;">
-        <button id="profileRulebookBtn" type="button">View all rule cards</button>
-      </div>
     </section>
   `;
 }
@@ -676,10 +634,7 @@ function renderAchievementsTab(user) {
   const achievements = user.achievements || [];
   return `
     <section class="profileSection wide">
-      <div class="shopHeader">
-        <h3>Achievements</h3>
-        <div class="coinBalance">${n(user.stats?.coins)} coins</div>
-      </div>
+      <h3>Achievements</h3>
       <div class="achievementGrid">
         ${achievements
           .map((a) => {
@@ -689,7 +644,7 @@ function renderAchievementsTab(user) {
                 <strong>${escapeHtml(a.name)}</strong>
                 <span>${escapeHtml(a.description)}</span>
                 <div class="rankProgress"><span style="width: ${progress}%"></span></div>
-                <small>${n(a.progress)} / ${n(a.target)} &middot; ${n(a.reward)} coins ${a.claimed ? "claimed" : "reward"}</small>
+                <small>${n(a.progress)} / ${n(a.target)}</small>
               </div>
             `;
           })
@@ -739,21 +694,13 @@ function renderCosmeticsTab(user) {
 
 function cosmeticOptions(user, group, selected) {
   const items = (user.cosmetics?.[group] || []).filter((item) => item.unlocked);
-  const selectedIsCatalog = items.some((item) => item.name === selected);
-  const customOption =
-    group === "avatars"
-      ? `<option value="__custom_avatar__" ${selected === user.profile?.customAvatar && !selectedIsCatalog ? "selected" : ""}>Custom icon (${escapeHtml(user.profile?.customAvatar || "CC")})</option>`
-      : "";
-  return (
-    customOption +
-    items
+  return items
     .map((item) => {
       const value = item.name;
       const label = item.label || item.name;
       return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
     })
-    .join("")
-  );
+    .join("");
 }
 
 function renderSettingsTab(user) {
@@ -764,7 +711,6 @@ function renderSettingsTab(user) {
       <div class="settingsGrid">
         <div class="fieldStack"><label for="settingsUsername">Username</label><input id="settingsUsername" maxlength="16" value="${escapeAttr(user.username)}" /></div>
         <div class="fieldStack"><label for="settingsAvatar">Avatar / icon</label><select id="settingsAvatar">${cosmeticOptions(user, "avatars", p.avatar)}</select></div>
-        <div class="fieldStack"><label for="settingsCustomAvatar">Custom icon</label><input id="settingsCustomAvatar" maxlength="4" value="${escapeAttr(p.customAvatar || p.avatar || "")}" /></div>
         <div class="fieldStack"><label for="settingsBanner">Banner</label><select id="settingsBanner">${cosmeticOptions(user, "banners", p.banner)}</select></div>
         <div class="fieldStack"><label for="settingsCountry">Country / region</label><input id="settingsCountry" maxlength="32" value="${escapeAttr(p.country || "")}" /></div>
         <div class="fieldStack wide"><label for="settingsBio">Short bio</label><input id="settingsBio" maxlength="160" value="${escapeAttr(p.bio || "")}" /></div>
@@ -841,7 +787,6 @@ async function saveProfileSettings() {
       body: JSON.stringify({
         username: profileValue("settingsUsername"),
         avatar: profileValue("settingsAvatar"),
-        customAvatar: profileValue("settingsCustomAvatar"),
         banner: profileValue("settingsBanner"),
         country: profileValue("settingsCountry"),
         bio: profileValue("settingsBio"),
@@ -1540,64 +1485,6 @@ function renderAds() {
   }
 }
 
-function showEmoteToast(payload) {
-  const now = nowMs();
-  state.emoteToasts.push({
-    id: `${payload?.playerId || "p"}-${now}`,
-    playerId: payload?.playerId,
-    color: payload?.color,
-    name: payload?.name || "Player",
-    text: payload?.text || "Good game",
-    born: now,
-    life: 2600,
-  });
-  logLine(`<strong>${escapeHtml(payload?.name || "Player")}</strong>: ${escapeHtml(payload?.text || "")}`);
-}
-
-function drawEmoteToasts(t) {
-  const next = [];
-  const size = els.canvas.width / 8;
-  for (const toast of state.emoteToasts) {
-    const age = t - toast.born;
-    if (age > toast.life) continue;
-    next.push(toast);
-    const player = playerById(toast.playerId) || playerByColor(toast.color);
-    const profile = playerProfile(player);
-    const targetSq = toast.color === "b" ? 60 : 4;
-    const c = squareToCanvasCenter(targetSq);
-    const p = Math.min(1, age / 260);
-    const fade = age > toast.life - 420 ? 1 - (age - (toast.life - 420)) / 420 : 1;
-    const y = c.y + (toast.color === "b" ? -size * 0.95 : size * 0.95) - (1 - p) * size * 0.18;
-    const text = String(toast.text || "").slice(0, 40);
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, fade);
-    ctx.font = `${Math.floor(size * 0.15)}px Inter, system-ui, sans-serif`;
-    const width = Math.min(size * 3.4, Math.max(size * 1.45, ctx.measureText(text).width + size * 0.74));
-    ctx.fillStyle = "rgba(5, 12, 25, 0.88)";
-    ctx.strokeStyle = toast.color === "w" ? "rgba(255,255,255,0.42)" : "rgba(123,211,255,0.42)";
-    ctx.lineWidth = Math.max(1.5, size * 0.018);
-    ctx.beginPath();
-    ctx.roundRect(c.x - width / 2, y - size * 0.22, width, size * 0.44, size * 0.08);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,0.94)";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, c.x + size * 0.16, y);
-    ctx.fillStyle = toast.color === "w" ? "#fffdf7" : "#101422";
-    ctx.strokeStyle = "rgba(255,255,255,0.34)";
-    ctx.beginPath();
-    ctx.roundRect(c.x - width / 2 + size * 0.08, y - size * 0.16, size * 0.32, size * 0.32, size * 0.045);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = toast.color === "w" ? "#101827" : "#fffdf7";
-    ctx.font = `${Math.floor(size * 0.1)}px Inter, system-ui, sans-serif`;
-    ctx.fillText(profile.avatar || "?", c.x - width / 2 + size * 0.24, y);
-    ctx.restore();
-  }
-  state.emoteToasts = next;
-}
-
 function tickAds() {
   const active = !!state.serverState?.adAttack && !!state.lobby;
   if (!active) {
@@ -1613,34 +1500,6 @@ function tickAds() {
   }
 }
 
-function boardPalette(name) {
-  const key = skinClass(name);
-  const palettes = {
-    "lava-board": { light: "#ffc2a3", dark: "#8d2730", lavaLight: "#ffd166", lavaDark: "#c83d22", deadlyLight: "#ffc06f", deadlyDark: "#5f2b16" },
-    midnight: { light: "#b9c8ff", dark: "#1b2546", lavaLight: "#ff9d8a", lavaDark: "#8d2430", deadlyLight: "#d09a5f", deadlyDark: "#3a2530" },
-    "candy-clash": { light: "#fff0f7", dark: "#7bd3ff", lavaLight: "#ff9bbd", lavaDark: "#ff5f87", deadlyLight: "#ffe58f", deadlyDark: "#d58bff" },
-    "arcade-grid": { light: "#151d36", dark: "#0a1023", lavaLight: "#ff7a59", lavaDark: "#711f38", deadlyLight: "#ffd166", deadlyDark: "#47325f", grid: "rgba(36, 214, 200, 0.28)" },
-    "royal-marble": { light: "#f2eee4", dark: "#49618a", lavaLight: "#e8b36f", lavaDark: "#9c3842", deadlyLight: "#e5c072", deadlyDark: "#6b4a2e", veins: true },
-  };
-  return palettes[key] || { light: "#dbe2ff", dark: "#3c4b83", lavaLight: "#ffb4b4", lavaDark: "#c24848", deadlyLight: "#ffd7a8", deadlyDark: "#9a5520" };
-}
-
-function drawBoardSkinDetail(x, y, size, sq, palette, t) {
-  if (palette.grid) {
-    ctx.strokeStyle = palette.grid;
-    ctx.lineWidth = Math.max(1, size * 0.015);
-    ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
-  }
-  if (palette.veins && (sq + Math.floor(t / 900)) % 5 === 0) {
-    ctx.strokeStyle = "rgba(255,255,255,0.24)";
-    ctx.lineWidth = Math.max(1, size * 0.012);
-    ctx.beginPath();
-    ctx.moveTo(x + size * 0.12, y + size * 0.72);
-    ctx.bezierCurveTo(x + size * 0.38, y + size * 0.52, x + size * 0.52, y + size * 0.18, x + size * 0.86, y + size * 0.26);
-    ctx.stroke();
-  }
-}
-
 function draw() {
   requestAnimationFrame(draw);
   if (!state.serverState) return;
@@ -1652,7 +1511,6 @@ function draw() {
     s.fogOfWar && s.fogOfWarSquares && state.color ? new Set(s.fogOfWarSquares[state.color] || []) : null;
 
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
-  const palette = boardPalette(localProfile().boardSkin);
 
   // Board.
   for (let rank = 0; rank < 8; rank++) {
@@ -1663,15 +1521,14 @@ function draw() {
       x -= size / 2;
       y -= size / 2;
 
-      let fill = light ? palette.light : palette.dark;
-      if (s.hazards?.lava?.includes(sq)) fill = light ? palette.lavaLight : palette.lavaDark;
-      if (s.hazards?.deadly?.includes(sq)) fill = light ? palette.deadlyLight : palette.deadlyDark;
+      let fill = light ? "#dbe2ff" : "#3c4b83";
+      if (s.hazards?.lava?.includes(sq)) fill = light ? "#ffb4b4" : "#c24848";
+      if (s.hazards?.deadly?.includes(sq)) fill = light ? "#ffd7a8" : "#9a5520";
       if (s.marks?.lightning?.includes(sq)) fill = light ? "#fff1a8" : "#b88d1c";
       if (s.missingSquares?.includes(sq)) fill = "rgba(10,12,18,0.65)";
 
       ctx.fillStyle = fill;
       ctx.fillRect(x, y, size, size);
-      drawBoardSkinDetail(x, y, size, sq, palette, t);
 
       if (fogVisible && !fogVisible.has(sq) && !(s.missingSquares || []).includes(sq)) {
         ctx.fillStyle = "rgba(10,12,18,0.55)";
@@ -1725,7 +1582,6 @@ function draw() {
   drawAnimations(t);
   drawSupplyDrops(t);
   drawBullets(t);
-  drawEmoteToasts(t);
 
   // Particles.
   const next = [];
@@ -2046,67 +1902,9 @@ function drawPiece(sq, p) {
   drawPieceAt(x, y, p, sq);
 }
 
-function pieceSkinForColor(color) {
-  return playerProfile(playerByColor(color)).pieceSkin;
-}
-
-function drawPieceSkinBase(x, y, size, p, skin) {
-  const key = skinClass(skin);
-  if (key === "standard") return;
-  ctx.save();
-  if (key === "royal-glass") {
-    const g = ctx.createRadialGradient(x - size * 0.12, y - size * 0.16, size * 0.04, x, y, size * 0.42);
-    g.addColorStop(0, "rgba(255,255,255,0.62)");
-    g.addColorStop(0.55, p.color === "w" ? "rgba(123,211,255,0.24)" : "rgba(202,166,255,0.24)");
-    g.addColorStop(1, "rgba(255,255,255,0.05)");
-    ctx.fillStyle = g;
-    ctx.strokeStyle = "rgba(255,255,255,0.42)";
-    ctx.lineWidth = Math.max(2, size * 0.028);
-    ctx.beginPath();
-    ctx.arc(x, y, size * 0.38, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  } else if (key === "neon-plastic") {
-    ctx.shadowColor = p.color === "w" ? "rgba(36,214,200,0.95)" : "rgba(255,79,139,0.95)";
-    ctx.shadowBlur = size * 0.22;
-    ctx.strokeStyle = p.color === "w" ? "rgba(36,214,200,0.8)" : "rgba(255,79,139,0.8)";
-    ctx.lineWidth = Math.max(3, size * 0.035);
-    ctx.beginPath();
-    ctx.arc(x, y, size * 0.36, 0, Math.PI * 2);
-    ctx.stroke();
-  } else if (key === "lava-stone") {
-    ctx.fillStyle = p.color === "w" ? "rgba(255,209,102,0.26)" : "rgba(255,90,100,0.24)";
-    ctx.strokeStyle = "rgba(35,20,18,0.72)";
-    ctx.lineWidth = Math.max(2, size * 0.03);
-    ctx.beginPath();
-    ctx.roundRect(x - size * 0.33, y - size * 0.32, size * 0.66, size * 0.64, size * 0.12);
-    ctx.fill();
-    ctx.stroke();
-  } else if (key === "toy-army") {
-    ctx.fillStyle = p.color === "w" ? "rgba(156,255,107,0.32)" : "rgba(58,139,255,0.30)";
-    ctx.strokeStyle = "rgba(16,24,39,0.55)";
-    ctx.lineWidth = Math.max(2, size * 0.025);
-    ctx.beginPath();
-    ctx.ellipse(x, y + size * 0.26, size * 0.30, size * 0.08, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  } else if (key === "void-metal") {
-    ctx.fillStyle = "rgba(6,8,18,0.54)";
-    ctx.strokeStyle = p.color === "w" ? "rgba(202,166,255,0.65)" : "rgba(123,211,255,0.55)";
-    ctx.lineWidth = Math.max(2, size * 0.03);
-    ctx.beginPath();
-    ctx.arc(x, y, size * 0.39, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
 function drawPieceAt(x, y, p, sq = null) {
   const size = els.canvas.width / 8;
   const colourBlind = !!(state.serverState && state.serverState.colourBlind);
-  const pieceSkin = pieceSkinForColor(p?.color);
-  const pieceSkinKey = skinClass(pieceSkin);
   const shieldCharges =
     p?.type === "k" && p?.color && state.serverState?.shield && typeof state.serverState.shield[p.color] === "number"
       ? state.serverState.shield[p.color]
@@ -2145,40 +1943,20 @@ function drawPieceAt(x, y, p, sq = null) {
     }
   }
 
-  drawPieceSkinBase(x, y, size, p, pieceSkin);
-
   ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   if (colourBlind) {
     ctx.fillStyle = "rgba(210,215,226,0.92)";
     ctx.strokeStyle = "rgba(10,12,18,0.42)";
-  } else if (pieceSkinKey === "royal-glass") {
-    ctx.fillStyle = p.color === "w" ? "rgba(255,255,255,0.88)" : "rgba(189,205,255,0.88)";
-    ctx.strokeStyle = "rgba(255,255,255,0.36)";
-  } else if (pieceSkinKey === "neon-plastic") {
-    ctx.fillStyle = p.color === "w" ? "#24d6c8" : "#ff4f8b";
-    ctx.strokeStyle = "rgba(5,8,18,0.72)";
-  } else if (pieceSkinKey === "lava-stone") {
-    ctx.fillStyle = p.color === "w" ? "#ffd166" : "#251118";
-    ctx.strokeStyle = p.color === "w" ? "rgba(88,39,22,0.68)" : "rgba(255,122,89,0.76)";
-  } else if (pieceSkinKey === "toy-army") {
-    ctx.fillStyle = p.color === "w" ? "#9cff6b" : "#3a8bff";
-    ctx.strokeStyle = "rgba(8,18,22,0.72)";
-  } else if (pieceSkinKey === "void-metal") {
-    ctx.fillStyle = p.color === "w" ? "#e8e9ff" : "#060812";
-    ctx.strokeStyle = p.color === "w" ? "rgba(91,56,140,0.7)" : "rgba(123,211,255,0.72)";
   } else {
     ctx.fillStyle = p.color === "w" ? "#fbfbff" : "#101422";
     ctx.strokeStyle = p.color === "w" ? "rgba(10,12,18,0.28)" : "rgba(255,255,255,0.18)";
   }
-  ctx.shadowColor = pieceSkinKey === "standard" ? "transparent" : ctx.strokeStyle;
-  ctx.shadowBlur = pieceSkinKey === "standard" ? 0 : size * 0.08;
   ctx.lineWidth = 4;
   const glyph = (colourBlind ? map[p.type]?.w : map[p.type]?.[p.color]) || "?";
   ctx.strokeText(glyph, x, y + 2);
   ctx.fillText(glyph, x, y);
-  ctx.shadowBlur = 0;
 
   // Rule icon (tiny dot).
   if (p.tags?.includes("tempQueen")) {
@@ -2358,7 +2136,7 @@ function ruleArtIcon(ruleId, ruleName) {
 
 function buildRuleCard(r, { pickable }) {
   const div = document.createElement("div");
-  div.className = `card ${pickable ? "pickable" : ""} ${r.kind} cardBack-${skinClass(localProfile().cardBack)}`.trim().replace(/\s+/g, " ");
+  div.className = `card ${pickable ? "pickable" : ""} ${r.kind}`.trim().replace(/\s+/g, " ");
 
   const turns = r.remaining != null ? `${r.remaining}t` : "";
   const typeIcon = ruleTypeIcon(r.kind);
@@ -2820,32 +2598,6 @@ function renderOpenServers() {
   }
 }
 
-function setCosmeticClass(el, prefix, name) {
-  if (!el) return;
-  for (const cls of [...el.classList]) {
-    if (cls.startsWith(prefix)) el.classList.remove(cls);
-  }
-  el.classList.add(`${prefix}${skinClass(name)}`);
-}
-
-function applyGameCosmetics() {
-  const profile = localProfile();
-  setCosmeticClass(document.body, "skin-board-", profile.boardSkin);
-  setCosmeticClass(document.body, "skin-pieces-", profile.pieceSkin);
-  setCosmeticClass(document.body, "skin-cardback-", profile.cardBack);
-  setCosmeticClass(els.boardWrap, "skin-border-", profile.border);
-  if (els.emoteBtn) els.emoteBtn.textContent = profile.emote || "Emote";
-}
-
-function playerLabel(player) {
-  const profile = playerProfile(player);
-  return `
-    <span class="boardNameAvatar">${escapeHtml(profile.avatar || "?")}</span>
-    <span class="boardNameText">${escapeHtml(player?.name || "Player")}</span>
-    <span class="boardNameEmote">${escapeHtml(profile.emote || "")}</span>
-  `;
-}
-
 function syncUI() {
   const s = state.serverState;
   const connected = !!state.lobby;
@@ -2853,7 +2605,6 @@ function syncUI() {
   els.lobbyPanel.hidden = connected;
   els.gamePanel.hidden = !connected;
   if (!connected) return;
-  applyGameCosmetics();
 
   if (!s) {
     els.lobbyCode.textContent = state.lobby;
@@ -2901,13 +2652,11 @@ function syncUI() {
 
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
 
-  const whitePlayer = players.find((p) => p.color === "w") || { name: "White", color: "w" };
-  const blackPlayer = players.find((p) => p.color === "b") || { name: "Black", color: "b" };
-  const whiteName = (whitePlayer.name || "White").trim();
-  const blackName = (blackPlayer.name || "Black").trim();
+  const whiteName = (players.find((p) => p.color === "w")?.name || "White").trim();
+  const blackName = (players.find((p) => p.color === "b")?.name || "Black").trim();
   const topIsWhite = !!state.flipVisual;
-  if (els.sideLabelTop) els.sideLabelTop.innerHTML = playerLabel(topIsWhite ? whitePlayer : blackPlayer);
-  if (els.sideLabelBottom) els.sideLabelBottom.innerHTML = playerLabel(topIsWhite ? blackPlayer : whitePlayer);
+  if (els.sideLabelTop) els.sideLabelTop.textContent = topIsWhite ? whiteName : blackName;
+  if (els.sideLabelBottom) els.sideLabelBottom.textContent = topIsWhite ? blackName : whiteName;
   els.canvas.style.cursor =
     s.phase === "pawnSoldierShot" && s.pendingPawnSoldierShot?.playerId === state.playerId ? "crosshair" : "";
 
@@ -3052,11 +2801,6 @@ socket.on("game:state", (s) => {
   syncUI();
 });
 
-socket.on("game:emote", (payload) => {
-  if (!state.lobby) return;
-  showEmoteToast(payload || {});
-});
-
 socket.on("lobby:openServers", (payload) => {
   state.openServers = Array.isArray(payload?.servers) ? payload.servers : [];
   renderOpenServers();
@@ -3091,7 +2835,6 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (target?.id === "changePasswordBtn") changePassword();
   if (target?.id === "addFriendBtn") addFriend();
   if (target?.id === "deleteAccountBtn") deleteAccount();
-  if (target?.id === "profileRulebookBtn") openRulebook();
   const buyBtn = target?.closest?.(".buyCosmeticBtn");
   if (buyBtn) buyCosmetic(buyBtn.dataset.buyGroup, buyBtn.dataset.buyName);
 });
@@ -3151,13 +2894,6 @@ els.leaveBtn?.addEventListener("click", () => {
     if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "leave failed")}`);
     resetToLobby("Left lobby.");
     window.location.reload();
-  });
-});
-
-els.emoteBtn?.addEventListener("click", () => {
-  if (!state.lobby || !state.playerId) return;
-  socket.emit("game:emote", { code: state.lobby, playerId: state.playerId }, (res) => {
-    if (!res?.ok) logLine(`<strong>Emote</strong>: ${escapeHtml(res?.error || "emote failed")}`);
   });
 });
 
