@@ -761,8 +761,7 @@ class Game {
       this.ruleChoicesByPlayerId = {};
       this.ruleChosenByPlayerId = {};
       for (const p of this.players) {
-        const isDebugPicker = this.debugMode && p?.name === "DEBUG";
-        this.ruleChoicesByPlayerId[p.id] = isDebugPicker ? this.ruleManager.allChoices() : this.ruleManager.randomChoices(3);
+        this.ruleChoicesByPlayerId[p.id] = this.debugMode ? this.ruleManager.allChoices() : this.ruleManager.randomChoices(3);
       }
       this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;
       this.effects.push({ type: "log", id: this.nextEffectId(), text: "Rule choice time!" });
