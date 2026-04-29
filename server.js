@@ -174,57 +174,57 @@ async function initDatabaseStore() {
 const COSMETIC_CATALOG = {
   avatars: [
     { name: "CC", label: "Classic CC", price: 0 },
-    { name: "K", label: "King Sigil", price: 75 },
-    { name: "Q", label: "Queen Mark", price: 75 },
-    { name: "CH", label: "Chaos Crest", price: 140 },
-    { name: "!!", label: "Rule Breaker", price: 180 },
-    { name: "GM", label: "Grand Anarchist", price: 280 },
+    { name: "K", label: "King Sigil", price: 225 },
+    { name: "Q", label: "Queen Mark", price: 225 },
+    { name: "CH", label: "Chaos Crest", price: 420 },
+    { name: "!!", label: "Rule Breaker", price: 540 },
+    { name: "GM", label: "Grand Anarchist", price: 840 },
   ],
   borders: [
     { name: "None", label: "None", price: 0 },
-    { name: "Neon", label: "Neon", price: 120 },
-    { name: "Lava Pulse", label: "Lava Pulse", price: 180 },
-    { name: "Royal Gold", label: "Royal Gold", price: 220 },
-    { name: "Glitch", label: "Glitch", price: 260 },
-    { name: "Anarchist", label: "Anarchist", price: 360 },
+    { name: "Neon", label: "Neon", price: 360 },
+    { name: "Lava Pulse", label: "Lava Pulse", price: 540 },
+    { name: "Royal Gold", label: "Royal Gold", price: 660 },
+    { name: "Glitch", label: "Glitch", price: 780 },
+    { name: "Anarchist", label: "Anarchist", price: 1080 },
   ],
   boardSkins: [
     { name: "Classic Chaos", label: "Classic Chaos", price: 0 },
-    { name: "Lava Board", label: "Lava Board", price: 180 },
-    { name: "Midnight", label: "Midnight", price: 160 },
-    { name: "Candy Clash", label: "Candy Clash", price: 150 },
-    { name: "Arcade Grid", label: "Arcade Grid", price: 220 },
-    { name: "Royal Marble", label: "Royal Marble", price: 300 },
+    { name: "Lava Board", label: "Lava Board", price: 1400 },
+    { name: "Midnight", label: "Midnight", price: 1650 },
+    { name: "Candy Clash", label: "Candy Clash", price: 2000 },
+    { name: "Arcade Grid", label: "Arcade Grid", price: 2260 },
+    { name: "Royal Marble", label: "Royal Marble", price: 2500 },
   ],
   pieceSkins: [
     { name: "Standard", label: "Standard", price: 0 },
-    { name: "Royal Glass", label: "Royal Glass", price: 180 },
-    { name: "Neon Plastic", label: "Neon Plastic", price: 200 },
-    { name: "Lava Stone", label: "Lava Stone", price: 240 },
-    { name: "Toy Army", label: "Toy Army", price: 160 },
-    { name: "Void Metal", label: "Void Metal", price: 320 },
+    { name: "Royal Glass", label: "Royal Glass", price: 1100 },
+    { name: "Neon Plastic", label: "Neon Plastic", price: 1240 },
+    { name: "Lava Stone", label: "Lava Stone", price: 1550 },
+    { name: "Toy Army", label: "Toy Army", price: 1720 },
+    { name: "Void Metal", label: "Void Metal", price: 2000 },
   ],
   emotes: [
     { name: "Good game", label: "Good game", price: 0 },
-    { name: "Calculated", label: "Calculated", price: 80 },
-    { name: "Oops", label: "Oops", price: 80 },
-    { name: "Rule diff", label: "Rule diff", price: 120 },
-    { name: "My queen was bait", label: "My queen was bait", price: 140 },
-    { name: "Chaos approved", label: "Chaos approved", price: 180 },
+    { name: "Calculated", label: "Calculated", price: 240 },
+    { name: "Oops", label: "Oops", price: 240 },
+    { name: "Rule diff", label: "Rule diff", price: 360 },
+    { name: "My queen was bait", label: "My queen was bait", price: 420 },
+    { name: "Chaos approved", label: "Chaos approved", price: 540 },
   ],
   banners: [
     { name: "Sunset Clash", label: "Sunset Clash", price: 0 },
-    { name: "Rule Storm", label: "Rule Storm", price: 160 },
-    { name: "Gold Table", label: "Gold Table", price: 220 },
-    { name: "Lava Lounge", label: "Lava Lounge", price: 240 },
-    { name: "Neon Boardwalk", label: "Neon Boardwalk", price: 260 },
-    { name: "Grand Arena", label: "Grand Arena", price: 340 },
+    { name: "Rule Storm", label: "Rule Storm", price: 480 },
+    { name: "Gold Table", label: "Gold Table", price: 660 },
+    { name: "Lava Lounge", label: "Lava Lounge", price: 720 },
+    { name: "Neon Boardwalk", label: "Neon Boardwalk", price: 780 },
+    { name: "Grand Arena", label: "Grand Arena", price: 1020 },
   ],
   cardBacks: [
     { name: "Classic Cards", label: "Classic Cards", price: 0 },
-    { name: "Lava Cards", label: "Lava Cards", price: 150 },
-    { name: "Gold Foil", label: "Gold Foil", price: 260 },
-    { name: "Static Noise", label: "Static Noise", price: 220 },
+    { name: "Lava Cards", label: "Lava Cards", price: 1000 },
+    { name: "Gold Foil", label: "Gold Foil", price: 1200 },
+    { name: "Static Noise", label: "Static Noise", price: 1450 },
   ],
 };
 
@@ -282,8 +282,10 @@ function defaultStats() {
 }
 
 function defaultProfile(username = "Player") {
+  const customAvatar = normalizeUsername(username).slice(0, 2).toUpperCase() || "CC";
   return {
-    avatar: normalizeUsername(username).slice(0, 2).toUpperCase() || "CC",
+    avatar: customAvatar,
+    customAvatar,
     banner: "Sunset Clash",
     country: "",
     bio: "",
@@ -304,6 +306,12 @@ function hydrateUser(user) {
   if (!user.stats.rating) user.stats.rating = 1000;
   if (!user.stats.peakRating) user.stats.peakRating = user.stats.rating;
   user.profile = { ...defaultProfile(user.username), ...(user.profile || {}) };
+  const avatarCatalog = new Set((COSMETIC_CATALOG.avatars || []).map((item) => item.name));
+  if (!user.profile.customAvatar) {
+    user.profile.customAvatar = avatarCatalog.has(user.profile.avatar)
+      ? (normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC")
+      : (user.profile.avatar || normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC");
+  }
   user.matchHistory = Array.isArray(user.matchHistory) ? user.matchHistory : [];
   user.ruleCollection = user.ruleCollection && typeof user.ruleCollection === "object" ? user.ruleCollection : {};
   user.achievementRewards = user.achievementRewards && typeof user.achievementRewards === "object" ? user.achievementRewards : {};
@@ -503,6 +511,27 @@ function performanceInsights(user) {
   };
 }
 
+function publicPlayerProfile(user) {
+  hydrateUser(user);
+  const p = user?.profile || {};
+  return {
+    avatar: p.avatar || "CC",
+    banner: p.banner || "Sunset Clash",
+    boardSkin: p.boardSkin || "Classic Chaos",
+    pieceSkin: p.pieceSkin || "Standard",
+    border: p.border || "None",
+    emote: p.emote || "Good game",
+    cardBack: p.cardBack || "Classic Cards",
+  };
+}
+
+function applyAccountToPlayer(player, account) {
+  if (!player || !account) return;
+  player.userId = account.id;
+  player.name = account.username;
+  player.profile = publicPlayerProfile(account);
+}
+
 function publicUser(user) {
   hydrateUser(user);
   if (!user) return null;
@@ -608,18 +637,24 @@ function recordGameStarted(user, mode) {
 
 function updateActivePlayerNames(user) {
   if (!user || typeof rooms === "undefined") return;
+  const changedRooms = [];
   for (const entry of rooms.values()) {
     const changedPlayers = [];
     for (const p of entry.room.players || []) {
       if (p.userId !== user.id) continue;
       p.name = user.username;
+      p.profile = publicPlayerProfile(user);
       changedPlayers.push(p.id);
     }
     if (!changedPlayers.length || !entry.room.game?.players) continue;
     for (const gp of entry.room.game.players) {
-      if (changedPlayers.includes(gp.id)) gp.name = user.username;
+      if (!changedPlayers.includes(gp.id)) continue;
+      gp.name = user.username;
+      gp.profile = publicPlayerProfile(user);
     }
+    if (entry.room?.code) changedRooms.push(entry.room.code);
   }
+  for (const code of changedRooms) pushEffectsAndState(code);
 }
 
 function authedUser(req, res) {
@@ -636,6 +671,10 @@ function setProfileCosmetic(user, group, value) {
   if (!field || typeof value !== "string") return { ok: true };
   const name = value.trim();
   if (!name) return { ok: true };
+  if (group === "avatars" && name === "__custom_avatar__") {
+    user.profile.avatar = user.profile.customAvatar || normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC";
+    return { ok: true };
+  }
   if (!ownsCosmetic(user, group, name)) return { ok: false, error: `You have not unlocked ${name}.` };
   user.profile[field] = name;
   return { ok: true };
@@ -746,6 +785,9 @@ app.patch("/api/me", async (req, res) => {
   }
 
   const p = user.profile;
+  if (typeof body.customAvatar === "string") {
+    p.customAvatar = body.customAvatar.trim().slice(0, 4) || normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC";
+  }
   for (const [group, field] of Object.entries(COSMETIC_PROFILE_FIELDS)) {
     if (typeof body[field] !== "string") continue;
     const result = setProfileCosmetic(user, group, body[field]);
@@ -753,6 +795,7 @@ app.patch("/api/me", async (req, res) => {
   }
   if (typeof body.country === "string") p.country = body.country.trim().slice(0, 32);
   if (typeof body.bio === "string") p.bio = body.bio.trim().slice(0, 160);
+  updateActivePlayerNames(user);
 
   saveUsers(userStore);
   await flushUserStoreWrites();
@@ -1469,7 +1512,7 @@ io.on("connection", (socket) => {
     rooms.set(code, { room, socketsByPlayerId: new Map() });
 
     const player = room.addPlayer(socket.id, account.username);
-    player.userId = account.id;
+    applyAccountToPlayer(player, account);
     socket.join(code);
     rooms.get(code).socketsByPlayerId.set(player.id, socket.id);
     recordGameStarted(account, "multiplayer");
@@ -1488,9 +1531,20 @@ io.on("connection", (socket) => {
     rooms.set(code, { room, socketsByPlayerId: new Map(), botTimer: null });
 
     const player = room.addPlayer(socket.id, account.username);
-    player.userId = account.id;
+    applyAccountToPlayer(player, account);
     const bot = room.addPlayer(null, "Chaos Bot");
-    if (bot) bot.bot = true;
+    if (bot) {
+      bot.bot = true;
+      bot.profile = {
+        avatar: "BOT",
+        banner: "Rule Storm",
+        boardSkin: "Arcade Grid",
+        pieceSkin: "Void Metal",
+        border: "Glitch",
+        emote: "Chaos approved",
+        cardBack: "Static Noise",
+      };
+    }
 
     socket.join(code);
     rooms.get(code).socketsByPlayerId.set(player.id, socket.id);
@@ -1516,7 +1570,7 @@ io.on("connection", (socket) => {
     }
     const player = room.addPlayer(socket.id, account.username);
     if (!player) return cb?.({ ok: false, error: "Lobby full" });
-    player.userId = account.id;
+    applyAccountToPlayer(player, account);
 
     socket.join(code);
     entry.socketsByPlayerId.set(player.id, socket.id);
@@ -1644,6 +1698,18 @@ io.on("connection", (socket) => {
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
     pushEffectsAndState(code);
+  });
+
+  socket.on("game:emote", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const player = entry.room.players.find((p) => p.id === pid);
+    const text = String(player?.profile?.emote || "Good game").slice(0, 40);
+    emitToRoomAndPlayers(code, entry, "game:emote", { playerId: pid, name: player?.name || "Player", color: player?.color || null, text });
+    cb?.({ ok: true });
   });
 
   socket.on("game:ready", ({ code, playerId } = {}, cb) => {

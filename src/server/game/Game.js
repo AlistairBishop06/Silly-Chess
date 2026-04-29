@@ -501,7 +501,7 @@ class Game {
 
   start(players) {
     this.started = true;
-    this.players = players.map((p) => ({ id: p.id, name: p.name, color: p.color }));
+    this.players = players.map((p) => ({ id: p.id, name: p.name, color: p.color, profile: p.profile || null }));
     this.phase = "play";
     this.result = null;
     this.resultInfo = null;
@@ -2012,7 +2012,7 @@ class Game {
     return {
       roomCode: this.roomCode,
       started: this.started,
-      players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color })),
+      players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color, profile: p.profile || null })),
       board: serializeBoard(board),
       turn: this.state.turn,
       ply: this.ply,
