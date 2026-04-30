@@ -34,6 +34,12 @@ const els = {
   createCloseBtn: document.getElementById("createCloseBtn"),
   createPublicBtn: document.getElementById("createPublicBtn"),
   createPrivateBtn: document.getElementById("createPrivateBtn"),
+  shopBtn: document.getElementById("shopBtn"),
+  shopModal: document.getElementById("shopModal"),
+  shopCloseBtn: document.getElementById("shopCloseBtn"),
+  shopResetTimer: document.getElementById("shopResetTimer"),
+  shopStatus: document.getElementById("shopStatus"),
+  shopOffers: document.getElementById("shopOffers"),
   code: document.getElementById("codeInput"),
   joinBtn: document.getElementById("joinBtn"),
   joinModal: document.getElementById("joinModal"),
@@ -133,6 +139,8 @@ const state = {
   adminSelectedUserId: null,
   adminUserDraft: "",
   activeEmotes: {},
+  dailyShop: null,
+  shopClockOffset: 0,
 };
 
 const confetti = {
@@ -676,7 +684,7 @@ function renderCosmeticsTab(user) {
   return `
     <section class="profileSection wide">
       <div class="shopHeader">
-        <h3>Cosmetics / Shop</h3>
+        <h3>Cosmetics</h3>
         <div class="coinBalance">${coinsText(user)} coins</div>
       </div>
       <div class="cosmeticGrid">
@@ -691,11 +699,6 @@ function renderCosmeticsTab(user) {
                       <div class="cosmeticItem ${item.unlocked ? "unlocked" : "locked"}">
                         <span>${escapeHtml(item.label || item.name)}</span>
                         <strong>${item.selected ? "Equipped" : item.unlocked ? "Owned" : `${n(item.price)} coins`}</strong>
-                        ${
-                          item.unlocked
-                            ? ""
-                            : `<button class="buyCosmeticBtn" type="button" data-buy-group="${escapeAttr(group)}" data-buy-name="${escapeAttr(item.name)}" ${item.affordable ? "" : "disabled"}>Buy</button>`
-                        }
                       </div>
                     `
                   )
@@ -718,6 +721,124 @@ function cosmeticOptions(user, group, selected) {
       return `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
     })
     .join("");
+}
+
+function cosmeticGroupLabel(group) {
+  return String(group || "").replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+}
+
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function updateShopTimer() {
+  if (!els.shopResetTimer) return;
+  const shop = state.dailyShop;
+  if (!shop?.resetAt) {
+    els.shopResetTimer.textContent = "--:--:--";
+    return;
+  }
+  const serverNow = Date.now() + (state.shopClockOffset || 0);
+  els.shopResetTimer.textContent = formatCountdown(shop.resetAt - serverNow);
+}
+
+function previewBoardStyle(name) {
+  const p = boardPalette(name);
+  return `--preview-light:${p.light};--preview-dark:${p.dark};--preview-accent:${p.accent};`;
+}
+
+function cosmeticPreview(item) {
+  const group = item.group;
+  const slug = cosmeticSlug(item.name);
+  const label = escapeHtml(item.label || item.name);
+  if (group === "avatars") {
+    return `<div class="shopPreview avatarPreview">${escapeHtml(item.name.slice(0, 4).toUpperCase())}</div>`;
+  }
+  if (group === "borders") {
+    const cls = borderClass({ border: item.name });
+    return `<div class="shopPreview borderPreview ${escapeAttr(cls)}"><span>${label.slice(0, 2)}</span></div>`;
+  }
+  if (group === "boardSkins") {
+    return `<div class="shopPreview boardPreview" style="${escapeAttr(previewBoardStyle(item.name))}">${Array.from({ length: 16 }, (_, i) => `<span class="${(Math.floor(i / 4) + i) % 2 ? "dark" : "light"}"></span>`).join("")}</div>`;
+  }
+  if (group === "pieceSkins") {
+    return `<div class="shopPreview piecePreview piecePreview-${escapeAttr(slug)}">♛</div>`;
+  }
+  if (group === "emotes") {
+    return `<div class="shopPreview emotePreview">${label}</div>`;
+  }
+  if (group === "banners") {
+    return `<div class="shopPreview bannerPreview profileBanner-${escapeAttr(slug)}"></div>`;
+  }
+  if (group === "cardBacks") {
+    const cls = slug && slug !== "classic-cards" ? `cardBack-${slug}` : "";
+    return `<div class="shopPreview cardBackPreview card ${escapeAttr(cls)}"><span>Rule</span></div>`;
+  }
+  return `<div class="shopPreview">${label}</div>`;
+}
+
+function renderDailyShop() {
+  updateShopTimer();
+  if (!els.shopOffers) return;
+  const shop = state.dailyShop;
+  if (!shop?.offers) {
+    els.shopOffers.innerHTML = `<div class="modalStatus">Loading shop...</div>`;
+    return;
+  }
+  const user = state.account || {};
+  els.shopOffers.innerHTML = shop.offers
+    .map((item) => {
+      const owned = !!item.owned;
+      const affordable = !!item.affordable;
+      const disabled = owned || !affordable ? "disabled" : "";
+      const status = owned ? "Owned" : `${n(item.price)} coins`;
+      return `
+        <div class="dailyShopItem ${owned ? "owned" : ""}">
+          ${cosmeticPreview(item)}
+          <div class="dailyShopMeta">
+            <span>${escapeHtml(cosmeticGroupLabel(item.group))}</span>
+            <strong>${escapeHtml(item.label || item.name)}</strong>
+            <small>${escapeHtml(status)}</small>
+          </div>
+          <button class="buyCosmeticBtn" type="button" data-buy-group="${escapeAttr(item.group)}" data-buy-name="${escapeAttr(item.name)}" ${disabled}>
+            ${owned ? "Owned" : affordable ? "Buy" : "Insufficient coins"}
+          </button>
+        </div>
+      `;
+    })
+    .join("");
+  if (els.shopStatus) els.shopStatus.textContent = `Balance: ${coinsText(user)} coins`;
+}
+
+async function loadDailyShop() {
+  if (els.shopStatus) els.shopStatus.textContent = "Loading shop...";
+  if (els.shopOffers) els.shopOffers.innerHTML = "";
+  try {
+    const res = await fetch("/api/shop/daily", { headers: authHeaders(), cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to load shop.");
+    state.dailyShop = json.shop || null;
+    state.shopClockOffset = Number(state.dailyShop?.serverNow || Date.now()) - Date.now();
+    renderDailyShop();
+  } catch (err) {
+    if (els.shopStatus) els.shopStatus.textContent = err.message || "Failed to load shop.";
+    if (els.shopOffers) els.shopOffers.innerHTML = "";
+  }
+}
+
+function openShopModal() {
+  if (!ensureSignedIn()) return;
+  if (!els.shopModal) return;
+  els.shopModal.hidden = false;
+  loadDailyShop();
+}
+
+function closeShopModal() {
+  if (els.shopModal) els.shopModal.hidden = true;
 }
 
 function renderSettingsTab(user) {
@@ -970,6 +1091,8 @@ async function saveProfileSettings() {
     saveAccountSession();
     renderAccountUI();
     renderProfile();
+    const nextStatus = document.getElementById("settingsStatus");
+    if (nextStatus) nextStatus.textContent = "Saved.";
   } catch (err) {
     if (status) status.textContent = err.message || "Save failed.";
   }
@@ -1031,9 +1154,11 @@ async function buyCosmetic(group, name) {
     state.account = json.user;
     saveAccountSession();
     renderAccountUI();
-    renderProfile();
+    if (els.profileModal && !els.profileModal.hidden) renderProfile();
+    if (els.shopModal && !els.shopModal.hidden) await loadDailyShop();
   } catch (err) {
-    logLine(`<strong>Shop</strong>: ${escapeHtml(err.message || "Purchase failed.")}`);
+    if (els.shopStatus && els.shopModal && !els.shopModal.hidden) els.shopStatus.textContent = err.message || "Purchase failed.";
+    else logLine(`<strong>Shop</strong>: ${escapeHtml(err.message || "Purchase failed.")}`);
   }
 }
 
@@ -1191,6 +1316,11 @@ function boardPalette(name) {
     "candy-clash": { light: "#ffe9f4", dark: "#74d7d0", accent: "#ff4f8b", texture: "candy" },
     "arcade-grid": { light: "#142446", dark: "#07101f", accent: "#24d6c8", texture: "grid" },
     "royal-marble": { light: "#f5f0df", dark: "#7b83a7", accent: "#d19b38", texture: "marble" },
+    "forest-tactics": { light: "#cfe8bd", dark: "#2f6b4f", accent: "#9cff6b", texture: "forest" },
+    "frosted-glass": { light: "#e9fbff", dark: "#7aa9c7", accent: "#d7e7ff", texture: "frost" },
+    "desert-mirage": { light: "#f6d89b", dark: "#a76e38", accent: "#ff8a5c", texture: "desert" },
+    "cyber-circuit": { light: "#18213b", dark: "#030711", accent: "#8c6cff", texture: "grid" },
+    monochrome: { light: "#e8e8e8", dark: "#2b2d33", accent: "#ffffff", texture: "marble" },
   };
   return palettes[skin] || { light: "#dbe2ff", dark: "#3c4b83", accent: "#24d6c8", texture: "classic" };
 }
@@ -1246,6 +1376,27 @@ function drawBoardTile(sq, x, y, size, light, palette, s, t) {
     ctx.beginPath();
     ctx.moveTo(x + size * 0.08, y + size * 0.32);
     ctx.bezierCurveTo(x + size * 0.32, y + size * 0.15, x + size * 0.56, y + size * 0.85, x + size * 0.92, y + size * 0.62);
+    ctx.stroke();
+  } else if (palette.texture === "forest") {
+    ctx.fillStyle = palette.accent;
+    ctx.beginPath();
+    ctx.ellipse(x + size * 0.26, y + size * 0.28, size * 0.06, size * 0.13, -0.55, 0, Math.PI * 2);
+    ctx.ellipse(x + size * 0.68, y + size * 0.72, size * 0.05, size * 0.12, 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (palette.texture === "frost") {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(1, size * 0.014);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.5, y + size * 0.2);
+    ctx.lineTo(x + size * 0.5, y + size * 0.8);
+    ctx.moveTo(x + size * 0.24, y + size * 0.35);
+    ctx.lineTo(x + size * 0.76, y + size * 0.65);
+    ctx.stroke();
+  } else if (palette.texture === "desert") {
+    ctx.strokeStyle = "#ffe2a8";
+    ctx.lineWidth = Math.max(1, size * 0.018);
+    ctx.beginPath();
+    ctx.arc(x + size * 0.4, y + size * 0.85, size * 0.44, Math.PI * 1.08, Math.PI * 1.82);
     ctx.stroke();
   }
   ctx.restore();
@@ -2202,6 +2353,35 @@ function pieceSkinStyle(p, colourBlind = false) {
       accent: white ? "#8c6cff" : "#24d6c8",
       glow: white ? "rgba(140, 108, 255, 0.72)" : "rgba(36, 214, 200, 0.72)",
     },
+    "crystal-set": {
+      fill: white ? "#ffffff" : "#18213b",
+      stroke: white ? "#7bd3ff" : "#d7e7ff",
+      accent: "#7bd3ff",
+      glow: "rgba(123, 211, 255, 0.62)",
+    },
+    "brass-engines": {
+      fill: white ? "#fff1c2" : "#30200e",
+      stroke: "#d19b38",
+      accent: "#ffd166",
+      glow: "rgba(255, 209, 102, 0.45)",
+    },
+    "candy-pieces": {
+      fill: white ? "#fff7fb" : "#4b1835",
+      stroke: white ? "#ff4f8b" : "#74d7d0",
+      accent: white ? "#74d7d0" : "#ff4f8b",
+    },
+    "shadow-ink": {
+      fill: white ? "#d8d8e2" : "#03040a",
+      stroke: white ? "#384564" : "#c7b7ff",
+      accent: "#8c6cff",
+      glow: "rgba(140, 108, 255, 0.45)",
+    },
+    hologram: {
+      fill: white ? "rgba(245,255,255,0.88)" : "rgba(16,24,39,0.72)",
+      stroke: white ? "#24d6c8" : "#ff4f8b",
+      accent: "#d7e7ff",
+      glow: "rgba(36, 214, 200, 0.72)",
+    },
   };
   return styles[skin] ? { skin, ...styles[skin] } : {
     skin,
@@ -2221,7 +2401,7 @@ function drawPieceSkinBase(x, y, size, p, style) {
     ctx.shadowBlur = size * 0.22;
   }
 
-  if (skin === "royal-glass") {
+  if (skin === "royal-glass" || skin === "crystal-set" || skin === "hologram") {
     const g = ctx.createRadialGradient(x - size * 0.12, y - size * 0.15, size * 0.05, x, y, size * 0.42);
     g.addColorStop(0, "rgba(255,255,255,0.82)");
     g.addColorStop(0.45, p.color === "w" ? "rgba(215,231,255,0.48)" : "rgba(44,58,92,0.62)");
@@ -2244,8 +2424,10 @@ function drawPieceSkinBase(x, y, size, p, style) {
     ctx.beginPath();
     ctx.arc(x, y, size * 0.42, 0, Math.PI * 2);
     ctx.fill();
-  } else if (skin === "lava-stone") {
+  } else if (skin === "lava-stone" || skin === "brass-engines" || skin === "shadow-ink") {
     ctx.fillStyle = p.color === "w" ? "rgba(64, 31, 22, 0.24)" : "rgba(255, 90, 100, 0.14)";
+    if (skin === "brass-engines") ctx.fillStyle = "rgba(255, 209, 102, 0.18)";
+    if (skin === "shadow-ink") ctx.fillStyle = "rgba(5, 7, 17, 0.34)";
     ctx.beginPath();
     ctx.roundRect(x - size * 0.34, y - size * 0.34, size * 0.68, size * 0.68, size * 0.08);
     ctx.fill();
@@ -2256,8 +2438,14 @@ function drawPieceSkinBase(x, y, size, p, style) {
     ctx.lineTo(x - size * 0.04, y + size * 0.08);
     ctx.lineTo(x + size * 0.22, y - size * 0.1);
     ctx.stroke();
-  } else if (skin === "toy-army") {
+    if (skin === "brass-engines") {
+      ctx.beginPath();
+      ctx.arc(x + size * 0.24, y + size * 0.22, size * 0.07, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  } else if (skin === "toy-army" || skin === "candy-pieces") {
     ctx.fillStyle = p.color === "w" ? "rgba(255, 209, 102, 0.22)" : "rgba(156, 255, 107, 0.18)";
+    if (skin === "candy-pieces") ctx.fillStyle = p.color === "w" ? "rgba(255, 79, 139, 0.18)" : "rgba(116, 215, 208, 0.18)";
     ctx.strokeStyle = style.stroke;
     ctx.lineWidth = Math.max(2, size * 0.025);
     ctx.beginPath();
@@ -3288,6 +3476,10 @@ els.profileContent?.addEventListener("input", (ev) => {
   const target = ev.target;
   if (target?.id === "adminUserJson") adminUpdateDraft(target.value);
 });
+els.shopOffers?.addEventListener("click", (ev) => {
+  const buyBtn = ev.target?.closest?.(".buyCosmeticBtn");
+  if (buyBtn) buyCosmetic(buyBtn.dataset.buyGroup, buyBtn.dataset.buyName);
+});
 
 els.authCloseBtn?.addEventListener("click", () => closeAuthModal());
 els.authModal?.addEventListener("mousedown", (ev) => {
@@ -3322,6 +3514,11 @@ els.createPrivateBtn?.addEventListener("click", () => createLobby("private"));
 els.createCloseBtn?.addEventListener("click", () => closeCreateModal());
 els.createModal?.addEventListener("mousedown", (ev) => {
   if (ev.target === els.createModal) closeCreateModal();
+});
+els.shopBtn?.addEventListener("click", () => openShopModal());
+els.shopCloseBtn?.addEventListener("click", () => closeShopModal());
+els.shopModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.shopModal) closeShopModal();
 });
 
 els.joinBtn.addEventListener("click", () => {
@@ -3463,11 +3660,13 @@ els.canvas.addEventListener("mousedown", (ev) => {
 draw();
 
 setInterval(() => {
-  if (!state.serverState) return;
-  updateChoiceTimer();
-  updateRpsTimer();
-  updateWagerTimer();
-  tickAds();
+  updateShopTimer();
+  if (state.serverState) {
+    updateChoiceTimer();
+    updateRpsTimer();
+    updateWagerTimer();
+    tickAds();
+  }
 }, 250);
 
 // Fallback sync: if we haven't seen a state update recently, request one.

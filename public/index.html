@@ -16,6 +16,7 @@
         <div class="topbarRight">
           <div id="status" class="status">Not connected</div>
           <button id="profileBtn" class="profileBtn" type="button">Sign in</button>
+                          <button id="shopBtn" type="button">Shop</button>
         </div>
       </header>
 
@@ -267,6 +268,20 @@
           <button id="refreshServersBtn" type="button">Refresh</button>
         </div>
         <div id="openServers" class="openServers"></div>
+      </div>
+    </div>
+
+    <div id="shopModal" class="modal" hidden>
+      <div class="modalCard shopModalCard">
+        <div class="cardsHeader">
+          <h3>Daily Shop</h3>
+          <div class="rulebookActions">
+            <div id="shopResetTimer" class="timer">--:--:--</div>
+            <button id="shopCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div id="shopStatus" class="modalStatus"></div>
+        <div id="shopOffers" class="dailyShopGrid"></div>
       </div>
     </div>
 

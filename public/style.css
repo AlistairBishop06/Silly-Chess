@@ -465,7 +465,7 @@ body.is-connected .status::before {
 
 .joinGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   align-items: end;
   gap: 10px;
 }
@@ -816,6 +816,27 @@ body.is-in-game:not(.is-choosing) #gamePanel {
 .skin-border-anarchist::before {
   box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.56), inset 0 0 0 8px rgba(255, 79, 139, 0.34), 0 0 40px rgba(255, 209, 102, 0.32);
   animation: borderPulse 1.1s ease-in-out infinite;
+}
+
+.skin-border-circuit::before {
+  box-shadow: inset 0 0 0 3px rgba(36, 214, 200, 0.74), inset 8px 0 0 rgba(140, 108, 255, 0.28), 0 0 24px rgba(36, 214, 200, 0.28);
+}
+
+.skin-border-frost::before {
+  box-shadow: inset 0 0 0 3px rgba(215, 231, 255, 0.86), 0 0 30px rgba(123, 211, 255, 0.34);
+}
+
+.skin-border-candy-stripe::before {
+  box-shadow: inset 0 0 0 3px rgba(255, 79, 139, 0.82), inset 0 0 0 7px rgba(116, 215, 208, 0.24), 0 0 26px rgba(255, 79, 139, 0.26);
+}
+
+.skin-border-void-rift::before {
+  box-shadow: inset 0 0 0 4px rgba(140, 108, 255, 0.78), 0 0 34px rgba(140, 108, 255, 0.42);
+  animation: borderGlitch 1.2s steps(2, end) infinite;
+}
+
+.skin-border-emerald::before {
+  box-shadow: inset 0 0 0 4px rgba(59, 214, 127, 0.78), 0 0 34px rgba(59, 214, 127, 0.32);
 }
 
 @keyframes borderPulse {
@@ -1235,6 +1256,53 @@ body::-webkit-scrollbar {
 .card.cardBack-static-noise .desc,
 .card.cardBack-static-noise .typeLabel,
 .card.cardBack-static-noise .cardArtIcon {
+  color: #f9fbff;
+}
+
+.card.cardBack-nebula {
+  background:
+    radial-gradient(circle at 28% 20%, rgba(255, 79, 139, 0.55), transparent 28%),
+    radial-gradient(circle at 70% 72%, rgba(36, 214, 200, 0.42), transparent 30%),
+    linear-gradient(155deg, #151329, #4d3b8f 58%, #111827);
+}
+
+.card.cardBack-circuit-board {
+  background:
+    repeating-linear-gradient(90deg, rgba(36, 214, 200, 0.22) 0 2px, transparent 2px 18px),
+    repeating-linear-gradient(0deg, rgba(140, 108, 255, 0.16) 0 2px, transparent 2px 16px),
+    linear-gradient(155deg, #07101f, #17345a);
+}
+
+.card.cardBack-frosted {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(215, 231, 255, 0.2)),
+    linear-gradient(155deg, #eefcff, #8fc4dd 62%, #d7e7ff);
+}
+
+.card.cardBack-candy-pop {
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.32) 0 9px, transparent 9px 18px),
+    linear-gradient(155deg, #ffe9f4, #ff8ab0 58%, #74d7d0);
+}
+
+.card.cardBack-emerald-felt {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(156, 255, 107, 0.26), transparent 28%),
+    linear-gradient(155deg, #0d2b1f, #2f6b4f 62%, #143323);
+}
+
+.card.cardBack-nebula .name,
+.card.cardBack-nebula .desc,
+.card.cardBack-nebula .typeLabel,
+.card.cardBack-nebula .cardArtIcon,
+.card.cardBack-circuit-board .name,
+.card.cardBack-circuit-board .desc,
+.card.cardBack-circuit-board .typeLabel,
+.card.cardBack-circuit-board .cardArtIcon,
+.card.cardBack-emerald-felt .name,
+.card.cardBack-emerald-felt .desc,
+.card.cardBack-emerald-felt .typeLabel,
+.card.cardBack-emerald-felt .cardArtIcon {
   color: #f9fbff;
 }
 
@@ -1911,6 +1979,36 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
     rgba(5, 12, 25, 0.70);
 }
 
+.profileBanner-aurora-field {
+  background:
+    linear-gradient(135deg, rgba(156, 255, 107, 0.25), rgba(36, 214, 200, 0.32), rgba(140, 108, 255, 0.24)),
+    rgba(5, 12, 25, 0.64);
+}
+
+.profileBanner-storm-front {
+  background:
+    linear-gradient(135deg, rgba(123, 211, 255, 0.18), rgba(56, 69, 100, 0.58), rgba(255, 209, 102, 0.18)),
+    rgba(5, 12, 25, 0.68);
+}
+
+.profileBanner-crystal-hall {
+  background:
+    linear-gradient(135deg, rgba(215, 231, 255, 0.32), rgba(123, 211, 255, 0.22), rgba(255, 255, 255, 0.12)),
+    rgba(5, 12, 25, 0.64);
+}
+
+.profileBanner-verdant-crown {
+  background:
+    linear-gradient(135deg, rgba(59, 214, 127, 0.32), rgba(255, 209, 102, 0.18), rgba(20, 51, 35, 0.54)),
+    rgba(5, 12, 25, 0.64);
+}
+
+.profileBanner-void-horizon {
+  background:
+    linear-gradient(135deg, rgba(140, 108, 255, 0.34), rgba(255, 79, 139, 0.16), rgba(3, 4, 10, 0.70)),
+    rgba(5, 12, 25, 0.74);
+}
+
 .profileAvatar {
   width: clamp(76px, 11vw, 112px);
   aspect-ratio: 1;
@@ -2235,12 +2333,181 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
 
 .cosmeticItem {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .cosmeticItem button {
   min-height: 32px;
   padding: 6px 10px;
+}
+
+.shopModalCard {
+  width: min(980px, 94vw);
+}
+
+.dailyShopGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(136px, 1fr));
+  gap: 10px;
+}
+
+.dailyShopItem {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 112px minmax(92px, auto) auto;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 10px;
+}
+
+.dailyShopItem.owned {
+  border-color: rgba(156, 255, 107, 0.34);
+}
+
+.dailyShopItem button {
+  min-height: 34px;
+}
+
+.dailyShopMeta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dailyShopMeta span,
+.dailyShopMeta small {
+  color: rgba(249, 251, 255, 0.62);
+  font-size: 12px;
+}
+
+.dailyShopMeta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shopPreview {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(5, 12, 25, 0.42);
+}
+
+.avatarPreview,
+.borderPreview {
+  color: #111827;
+  background: linear-gradient(135deg, var(--gold), var(--pink));
+  font-size: 28px;
+  font-weight: 950;
+}
+
+.borderPreview::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.boardPreview {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 0;
+}
+
+.boardPreview span {
+  width: 100%;
+  height: 100%;
+}
+
+.boardPreview .light {
+  background: var(--preview-light);
+}
+
+.boardPreview .dark {
+  background: var(--preview-dark);
+}
+
+.piecePreview {
+  color: #fbfbff;
+  font-size: 56px;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.2);
+}
+
+.piecePreview-royal-glass,
+.piecePreview-crystal-set,
+.piecePreview-hologram {
+  color: #effbff;
+  background: radial-gradient(circle, rgba(215, 231, 255, 0.42), rgba(36, 214, 200, 0.08));
+}
+
+.piecePreview-neon-plastic,
+.piecePreview-void-metal {
+  color: #101827;
+  text-shadow: 0 0 16px rgba(36, 214, 200, 0.9);
+  background: linear-gradient(135deg, rgba(36, 214, 200, 0.32), rgba(255, 79, 139, 0.26));
+}
+
+.piecePreview-lava-stone,
+.piecePreview-brass-engines {
+  color: #ffe6bd;
+  background: linear-gradient(135deg, rgba(75, 29, 36, 0.9), rgba(255, 177, 92, 0.38));
+}
+
+.piecePreview-toy-army,
+.piecePreview-candy-pieces {
+  color: #f8ffdc;
+  background: linear-gradient(135deg, rgba(156, 255, 107, 0.24), rgba(255, 79, 139, 0.28));
+}
+
+.piecePreview-shadow-ink {
+  color: #050711;
+  text-shadow: 0 0 14px rgba(140, 108, 255, 0.9);
+  background: linear-gradient(135deg, #d8d8e2, #8c6cff);
+}
+
+.emotePreview {
+  align-content: center;
+  padding: 10px;
+  color: rgba(249, 251, 255, 0.92);
+  font-size: 14px;
+  font-weight: 860;
+  text-align: center;
+}
+
+.emotePreview::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  bottom: 14px;
+  width: 16px;
+  height: 16px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+
+.bannerPreview {
+  border: 0;
+}
+
+.cardBackPreview {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  transform: none;
+}
+
+.cardBackPreview span {
+  color: inherit;
+  font-weight: 950;
 }
 
 .dangerZone {
@@ -2359,6 +2626,10 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
 
   body.is-in-game #gamePanel {
     grid-template-columns: minmax(0, 1fr) minmax(250px, 34vw);
+  }
+
+  .dailyShopGrid {
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   }
 }
 

@@ -191,6 +191,11 @@ const COSMETIC_CATALOG = {
     { name: "CH", label: "Chaos Crest", price: 420 },
     { name: "!!", label: "Rule Breaker", price: 540 },
     { name: "GM", label: "Grand Anarchist", price: 840 },
+    { name: "RX", label: "Rook X", price: 620 },
+    { name: "ZZ", label: "Zigzag", price: 700 },
+    { name: "NO", label: "Knight Orbit", price: 760 },
+    { name: "8B", label: "Eight Bit", price: 820 },
+    { name: "VP", label: "Void Prince", price: 940 },
   ],
   borders: [
     { name: "None", label: "None", price: 0 },
@@ -199,6 +204,11 @@ const COSMETIC_CATALOG = {
     { name: "Royal Gold", label: "Royal Gold", price: 660 },
     { name: "Glitch", label: "Glitch", price: 780 },
     { name: "Anarchist", label: "Anarchist", price: 1080 },
+    { name: "Circuit", label: "Circuit", price: 900 },
+    { name: "Frost", label: "Frost", price: 960 },
+    { name: "Candy Stripe", label: "Candy Stripe", price: 1020 },
+    { name: "Void Rift", label: "Void Rift", price: 1180 },
+    { name: "Emerald", label: "Emerald", price: 1260 },
   ],
   boardSkins: [
     { name: "Classic Chaos", label: "Classic Chaos", price: 0 },
@@ -207,6 +217,11 @@ const COSMETIC_CATALOG = {
     { name: "Candy Clash", label: "Candy Clash", price: 2000 },
     { name: "Arcade Grid", label: "Arcade Grid", price: 2260 },
     { name: "Royal Marble", label: "Royal Marble", price: 2500 },
+    { name: "Forest Tactics", label: "Forest Tactics", price: 2100 },
+    { name: "Frosted Glass", label: "Frosted Glass", price: 2380 },
+    { name: "Desert Mirage", label: "Desert Mirage", price: 2440 },
+    { name: "Cyber Circuit", label: "Cyber Circuit", price: 2680 },
+    { name: "Monochrome", label: "Monochrome", price: 2820 },
   ],
   pieceSkins: [
     { name: "Standard", label: "Standard", price: 0 },
@@ -215,6 +230,11 @@ const COSMETIC_CATALOG = {
     { name: "Lava Stone", label: "Lava Stone", price: 1550 },
     { name: "Toy Army", label: "Toy Army", price: 1720 },
     { name: "Void Metal", label: "Void Metal", price: 2000 },
+    { name: "Crystal Set", label: "Crystal Set", price: 1820 },
+    { name: "Brass Engines", label: "Brass Engines", price: 1940 },
+    { name: "Candy Pieces", label: "Candy Pieces", price: 2060 },
+    { name: "Shadow Ink", label: "Shadow Ink", price: 2180 },
+    { name: "Hologram", label: "Hologram", price: 2360 },
   ],
   emotes: [
     { name: "Good game", label: "Good game", price: 0 },
@@ -223,6 +243,11 @@ const COSMETIC_CATALOG = {
     { name: "Rule diff", label: "Rule diff", price: 360 },
     { name: "My queen was bait", label: "My queen was bait", price: 420 },
     { name: "Chaos approved", label: "Chaos approved", price: 540 },
+    { name: "Your move", label: "Your move", price: 420 },
+    { name: "Brilliant chaos", label: "Brilliant chaos", price: 520 },
+    { name: "Not like this", label: "Not like this", price: 560 },
+    { name: "Try that again", label: "Try that again", price: 620 },
+    { name: "Check the rules", label: "Check the rules", price: 700 },
   ],
   banners: [
     { name: "Sunset Clash", label: "Sunset Clash", price: 0 },
@@ -231,12 +256,22 @@ const COSMETIC_CATALOG = {
     { name: "Lava Lounge", label: "Lava Lounge", price: 720 },
     { name: "Neon Boardwalk", label: "Neon Boardwalk", price: 780 },
     { name: "Grand Arena", label: "Grand Arena", price: 1020 },
+    { name: "Aurora Field", label: "Aurora Field", price: 880 },
+    { name: "Storm Front", label: "Storm Front", price: 940 },
+    { name: "Crystal Hall", label: "Crystal Hall", price: 1040 },
+    { name: "Verdant Crown", label: "Verdant Crown", price: 1120 },
+    { name: "Void Horizon", label: "Void Horizon", price: 1280 },
   ],
   cardBacks: [
     { name: "Classic Cards", label: "Classic Cards", price: 0 },
     { name: "Lava Cards", label: "Lava Cards", price: 1000 },
     { name: "Gold Foil", label: "Gold Foil", price: 1200 },
     { name: "Static Noise", label: "Static Noise", price: 1450 },
+    { name: "Nebula", label: "Nebula", price: 1320 },
+    { name: "Circuit Board", label: "Circuit Board", price: 1380 },
+    { name: "Frosted", label: "Frosted", price: 1500 },
+    { name: "Candy Pop", label: "Candy Pop", price: 1560 },
+    { name: "Emerald Felt", label: "Emerald Felt", price: 1680 },
   ],
 };
 
@@ -494,6 +529,65 @@ function buildAchievementsForUser(user, { award = false } = {}) {
 
 function catalogItem(group, name) {
   return (COSMETIC_CATALOG[group] || []).find((item) => item.name === name) || null;
+}
+
+function localDayWindow(now = Date.now()) {
+  const d = new Date(now);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { key, start, end };
+}
+
+function hashSeed(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function seededRandom(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let x = t;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function dailyShopOffers(user = null, now = Date.now()) {
+  const window = localDayWindow(now);
+  const candidates = [];
+  for (const [group, items] of Object.entries(COSMETIC_CATALOG)) {
+    for (const item of items) {
+      if ((item.price || 0) <= 0) continue;
+      candidates.push({ group, ...item });
+    }
+  }
+
+  const random = seededRandom(hashSeed(`shop:${window.key}`));
+  const shuffled = candidates
+    .map((item) => ({ item, sort: random() }))
+    .sort((a, b) => a.sort - b.sort)
+    .slice(0, 5)
+    .map(({ item }) => {
+      const owned = user ? ownsCosmetic(user, item.group, item.name) : false;
+      return {
+        ...item,
+        owned,
+        affordable: !!user?.isAdmin || !!owned || (user?.stats?.coins || 0) >= item.price,
+      };
+    });
+
+  return { key: window.key, resetAt: window.end, serverNow: now, offers: shuffled };
+}
+
+function isDailyShopOffer(group, name) {
+  return dailyShopOffers(null).offers.some((item) => item.group === group && item.name === name);
 }
 
 function ownsCosmetic(user, group, name) {
@@ -826,22 +920,28 @@ app.patch("/api/me", async (req, res) => {
     }
   }
 
-  const p = user.profile;
+  const p = user.profile || (user.profile = defaultProfile(user.username));
   if (typeof body.customAvatar === "string") {
     p.customAvatar = body.customAvatar.trim().slice(0, 4) || normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC";
   }
+  if (typeof body.country === "string") p.country = body.country.trim().slice(0, 32);
+  if (typeof body.bio === "string") p.bio = body.bio.trim().slice(0, 160);
   for (const [group, field] of Object.entries(COSMETIC_PROFILE_FIELDS)) {
     if (typeof body[field] !== "string") continue;
     const result = setProfileCosmetic(user, group, body[field]);
     if (!result.ok) return res.status(400).json(result);
   }
-  if (typeof body.country === "string") p.country = body.country.trim().slice(0, 32);
-  if (typeof body.bio === "string") p.bio = body.bio.trim().slice(0, 160);
   updateActivePlayerNames(user);
 
   saveUsers(userStore);
   await flushUserStoreWrites();
   res.json({ ok: true, user: publicUser(user) });
+});
+
+app.get("/api/shop/daily", (req, res) => {
+  const user = authedUser(req, res);
+  if (!user) return;
+  res.json({ ok: true, shop: dailyShopOffers(user) });
 });
 
 app.post("/api/me/shop/buy", async (req, res) => {
@@ -852,6 +952,9 @@ app.post("/api/me/shop/buy", async (req, res) => {
   const item = catalogItem(group, name);
   if (!item) return res.status(404).json({ ok: false, error: "Shop item not found." });
   if (ownsCosmetic(user, group, name)) return res.json({ ok: true, user: publicUser(user), alreadyOwned: true });
+  if ((item.price || 0) > 0 && !isDailyShopOffer(group, name)) {
+    return res.status(400).json({ ok: false, error: "That item is not in today's shop." });
+  }
   if (!user.isAdmin) {
     if ((user.stats.coins || 0) < item.price) return res.status(400).json({ ok: false, error: "Not enough coins." });
     user.stats.coins -= item.price;
