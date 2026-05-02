@@ -1526,6 +1526,24 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
     #121b30;
   padding: clamp(14px, 2vw, 18px);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+  will-change: transform;
+  transform-origin: center center;
+}
+
+.modalCard .cardsHeader,
+.modalCard .modalTitle {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.modalCard.is-dragging .cardsHeader,
+.modalCard.is-dragging .modalTitle {
+  cursor: grabbing;
+}
+
+.modalCard.is-dragging {
+  transition: none !important;
 }
 
 .modalTitle {
