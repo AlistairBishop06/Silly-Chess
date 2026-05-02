@@ -2078,6 +2078,12 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
     rgba(5, 12, 25, 0.62);
 }
 
+.profileBanner-sunset-clash {
+  background:
+    linear-gradient(135deg, rgba(36, 214, 200, 0.22), rgba(255, 209, 102, 0.18), rgba(255, 79, 139, 0.2)),
+    rgba(5, 12, 25, 0.62);
+}
+
 .profileBanner-gold-table {
   background:
     linear-gradient(135deg, rgba(255, 209, 102, 0.34), rgba(255, 122, 89, 0.22), rgba(36, 214, 200, 0.16)),
@@ -2618,7 +2624,102 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
 }
 
 .bannerPreview {
+  width: 100%;
+  height: 100%;
   border: 0;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.shopPreview.bannerPreview.profileBanner-rule-storm {
+  background:
+    linear-gradient(135deg, rgba(58, 139, 255, 0.32), rgba(156, 255, 107, 0.16), rgba(255, 79, 139, 0.22)),
+    rgba(5, 12, 25, 0.62);
+}
+
+.shopPreview.bannerPreview.profileBanner-sunset-clash {
+  background:
+    linear-gradient(135deg, rgba(36, 214, 200, 0.22), rgba(255, 209, 102, 0.18), rgba(255, 79, 139, 0.2)),
+    rgba(5, 12, 25, 0.62);
+}
+
+.shopPreview.bannerPreview.profileBanner-gold-table {
+  background:
+    linear-gradient(135deg, rgba(255, 209, 102, 0.34), rgba(255, 122, 89, 0.22), rgba(36, 214, 200, 0.16)),
+    rgba(5, 12, 25, 0.62);
+}
+
+.shopPreview.bannerPreview.profileBanner-lava-lounge {
+  background:
+    linear-gradient(135deg, rgba(255, 90, 100, 0.40), rgba(255, 209, 102, 0.20), rgba(75, 20, 28, 0.56)),
+    rgba(5, 12, 25, 0.62);
+}
+
+.shopPreview.bannerPreview.profileBanner-neon-boardwalk {
+  background:
+    linear-gradient(135deg, rgba(36, 214, 200, 0.36), rgba(58, 139, 255, 0.24), rgba(255, 79, 139, 0.28)),
+    rgba(5, 12, 25, 0.62);
+}
+
+.shopPreview.bannerPreview.profileBanner-grand-arena {
+  background:
+    linear-gradient(135deg, rgba(255, 209, 102, 0.32), rgba(202, 166, 255, 0.25), rgba(255, 255, 255, 0.12)),
+    rgba(5, 12, 25, 0.70);
+}
+
+.shopPreview.bannerPreview.profileBanner-aurora-field {
+  background:
+    linear-gradient(135deg, rgba(156, 255, 107, 0.25), rgba(36, 214, 200, 0.32), rgba(140, 108, 255, 0.24)),
+    rgba(5, 12, 25, 0.64);
+}
+
+.shopPreview.bannerPreview.profileBanner-storm-front {
+  background:
+    linear-gradient(135deg, rgba(123, 211, 255, 0.18), rgba(56, 69, 100, 0.58), rgba(255, 209, 102, 0.18)),
+    rgba(5, 12, 25, 0.68);
+}
+
+.shopPreview.bannerPreview.profileBanner-crystal-hall {
+  background:
+    linear-gradient(135deg, rgba(215, 231, 255, 0.32), rgba(123, 211, 255, 0.22), rgba(255, 255, 255, 0.12)),
+    rgba(5, 12, 25, 0.64);
+}
+
+.shopPreview.bannerPreview.profileBanner-verdant-crown {
+  background:
+    linear-gradient(135deg, rgba(59, 214, 127, 0.32), rgba(255, 209, 102, 0.18), rgba(20, 51, 35, 0.54)),
+    rgba(5, 12, 25, 0.64);
+}
+
+.shopPreview.bannerPreview.profileBanner-void-horizon {
+  background:
+    linear-gradient(135deg, rgba(140, 108, 255, 0.34), rgba(255, 79, 139, 0.16), rgba(3, 4, 10, 0.70)),
+    rgba(5, 12, 25, 0.74);
+}
+
+.bannerPreview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 48%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06), transparent 50%, rgba(0, 0, 0, 0.12));
+  pointer-events: none;
+}
+
+.bannerPreview::after {
+  content: "Banner";
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: rgba(5, 12, 25, 0.52);
+  color: rgba(249, 251, 255, 0.92);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .cardBackPreview {
