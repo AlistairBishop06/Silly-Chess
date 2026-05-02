@@ -894,6 +894,36 @@ function cosmeticPreview(item) {
   return `<div class="shopPreview">${label}</div>`;
 }
 
+function shopRarityForItem(item) {
+  const explicit = String(item?.rarity || "").toLowerCase();
+  if (["legendary", "epic", "rare", "common"].includes(explicit)) return explicit;
+  const price = Number(item?.price || 0);
+  if (price >= 1200) return "legendary";
+  if (price >= 850) return "epic";
+  if (price >= 500) return "rare";
+  return "common";
+}
+
+function rarityLabel(rarity) {
+  if (rarity === "legendary") return "Legendary";
+  if (rarity === "epic") return "Epic";
+  if (rarity === "rare") return "Rare";
+  return "Common";
+}
+
+function shopItemDescription(item) {
+  const name = item?.label || item?.name || "this cosmetic";
+  const group = String(item?.group || "");
+  if (group === "avatars") return `Profile avatar skin: ${name}.`;
+  if (group === "borders") return `Animated board border effect: ${name}.`;
+  if (group === "boardSkins") return `Chessboard theme with a fresh palette: ${name}.`;
+  if (group === "pieceSkins") return `Piece style pack for your full set: ${name}.`;
+  if (group === "emotes") return `Quick in-match emote line: ${name}.`;
+  if (group === "banners") return `Profile banner gradient style: ${name}.`;
+  if (group === "cardBacks") return `Rule card back design: ${name}.`;
+  return `Cosmetic unlock: ${name}.`;
+}
+
 function renderDailyShop() {
   updateShopTimer();
   if (!els.shopOffers) return;
@@ -907,24 +937,37 @@ function renderDailyShop() {
     .map((item) => {
       const owned = !!item.owned;
       const affordable = !!item.affordable;
+      const rarity = shopRarityForItem(item);
+      const description = shopItemDescription(item);
       const disabled = owned || !affordable ? "disabled" : "";
-      const status = owned ? "Owned" : `${n(item.price)} coins`;
+      const status = owned ? "Owned" : affordable ? "Ready to unlock" : "Need more coins";
+      const layoutClass = rarity === "legendary" || rarity === "epic" ? "shopFeatureTall" : "shopFeatureCompact";
       return `
-        <div class="dailyShopItem ${owned ? "owned" : ""}">
+        <div class="dailyShopItem ${owned ? "owned" : ""} rarity-${escapeAttr(rarity)} ${layoutClass}">
+          <div class="shopRarityBadge">${rarityLabel(rarity)}</div>
           ${cosmeticPreview(item)}
           <div class="dailyShopMeta">
-            <span>${escapeHtml(cosmeticGroupLabel(item.group))}</span>
             <strong>${escapeHtml(item.label || item.name)}</strong>
+            <div class="shopInfoGrid">
+              <span><b>Type</b>${escapeHtml(cosmeticGroupLabel(item.group))}</span>
+              <span><b>Rarity</b>${rarityLabel(rarity)}</span>
+            </div>
+            <p class="shopItemDesc">${escapeHtml(description)}</p>
             <small>${escapeHtml(status)}</small>
           </div>
+          <div class="shopPriceRow">
+            <span class="shopPrice">${n(item.price)} coins</span>
+          </div>
           <button class="buyCosmeticBtn" type="button" data-buy-group="${escapeAttr(item.group)}" data-buy-name="${escapeAttr(item.name)}" ${disabled}>
-            ${owned ? "Owned" : affordable ? "Buy" : "Insufficient coins"}
+            ${owned ? "Owned" : affordable ? "Unlock" : "Insufficient"}
           </button>
         </div>
       `;
     })
     .join("");
-  if (els.shopStatus) els.shopStatus.textContent = `Balance: ${coinsText(user)} coins`;
+  if (els.shopStatus) {
+    els.shopStatus.innerHTML = `<span class="shopBalancePill">Balance: ${coinsText(user)} coins</span><span class="shopSubtle">Epic and legendary items get the spotlight</span>`;
+  }
 }
 
 async function loadDailyShop() {
