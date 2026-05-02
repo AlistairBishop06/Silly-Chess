@@ -1633,6 +1633,88 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   width: min(620px, 92vw);
 }
 
+.mutantCard {
+  width: min(520px, 92vw);
+}
+
+#mutantModal {
+  z-index: 58;
+  place-items: start end;
+  padding: 14px;
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+#mutantModal .modalCard {
+  width: min(360px, 42vw);
+  max-height: min(44vh, 360px);
+  pointer-events: auto;
+}
+
+.mutantSelected {
+  min-height: 42px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.mutantChip {
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 79, 139, 0.44);
+  border-radius: var(--radius);
+  background: rgba(255, 79, 139, 0.14);
+  font-weight: 780;
+}
+
+.cardPopupLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 82;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.cardPopup {
+  width: min(260px, 62vw);
+  animation: cardPopupIn var(--card-popup-enter-ms, 720ms) cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  filter: drop-shadow(0 26px 70px rgba(0, 0, 0, 0.52));
+}
+
+.cardPopup .card {
+  min-height: 330px;
+}
+
+.cardPopup.leaving {
+  animation: cardPopupOut var(--card-popup-exit-ms, 280ms) ease both;
+}
+
+@keyframes cardPopupIn {
+  0% {
+    opacity: 0;
+    transform: translateY(34px) scale(0.74) rotate(-8deg);
+  }
+  16% {
+    opacity: 1;
+  }
+  58% {
+    transform: translateY(0) scale(1.06) rotate(2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes cardPopupOut {
+  to {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.9);
+  }
+}
+
 .shopGrid {
   display: grid;
   gap: 10px;

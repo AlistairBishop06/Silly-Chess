@@ -1509,6 +1509,25 @@ function runBotAction(roomCode) {
         }
       }
     }
+  } else if (game.phase === "mutantFusion") {
+    if (game.mutantFusion?.playerId === bot.id) {
+      const color = game.playerColor(bot.id);
+      const pieces = [];
+      for (let sq = 0; sq < 64; sq++) {
+        const p = game.state.board[sq];
+        if (p && p.color === color && p.color !== "x" && p.type !== "k") pieces.push(sq);
+      }
+      if (!pieces.length) {
+        for (let sq = 0; sq < 64; sq++) {
+          const p = game.state.board[sq];
+          if (p && p.color === color && p.color !== "x") pieces.push(sq);
+        }
+      }
+      const chosen = pieces.length ? [randItem(pieces)] : [];
+      const selectedOk = game.setMutantSelection(bot.id, chosen);
+      const confirmedOk = selectedOk.ok ? game.confirmMutantFusion(bot.id) : selectedOk;
+      changed = !!confirmedOk.ok;
+    }
   } else if (game.phase === "pawnSoldierShot") {
     const pending = game.pendingPawnSoldierShot;
     if (pending?.playerId === bot.id) {
@@ -1537,7 +1556,7 @@ function runBotAction(roomCode) {
   }
 
   if (changed) pushEffectsAndState(roomCode);
-  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "pawnSoldierShot", "supermarket"].includes(game.phase)) scheduleBotTurn(roomCode);
+  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "mutantFusion", "pawnSoldierShot", "supermarket"].includes(game.phase)) scheduleBotTurn(roomCode);
 }
 
 function scheduleBotTurn(roomCode) {
@@ -1909,6 +1928,32 @@ io.on("connection", (socket) => {
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
     touchPlayerSocket({ code, entry, playerId: pid, socket });
     const res = game.submitPawnSoldierShot(pid, target);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:mutantSelection", ({ code, playerId, squares } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.setMutantSelection(pid, squares);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:mutantConfirm", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.confirmMutantFusion(pid);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
     pushEffectsAndState(code);

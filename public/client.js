@@ -96,6 +96,11 @@ const els = {
   supermarketStatus: document.getElementById("supermarketStatus"),
   supermarketItems: document.getElementById("supermarketItems"),
   supermarketCheckoutBtn: document.getElementById("supermarketCheckoutBtn"),
+  mutantModal: document.getElementById("mutantModal"),
+  mutantStatus: document.getElementById("mutantStatus"),
+  mutantSelected: document.getElementById("mutantSelected"),
+  mutantConfirmBtn: document.getElementById("mutantConfirmBtn"),
+  cardPopupLayer: document.getElementById("cardPopupLayer"),
   adsLayer: document.getElementById("adsLayer"),
   log: document.getElementById("log"),
   gameMsg: document.getElementById("gameMsg"),
@@ -151,6 +156,10 @@ const confetti = {
   raf: 0,
 };
 
+const CARD_POPUP_HOLD_MS = 2000;
+const CARD_POPUP_EXIT_MS = 560;
+const CARD_POPUP_ENTER_MS = Math.max(240, CARD_POPUP_HOLD_MS - CARD_POPUP_EXIT_MS);
+
 const PIECE_GLYPH_MONO = {
   p: "♙",
   n: "♘",
@@ -164,6 +173,52 @@ function sqToAlg(sq) {
   const file = sq % 8;
   const rank = Math.floor(sq / 8);
   return String.fromCharCode(97 + file) + String(rank + 1);
+}
+
+function titanFootprint(anchor) {
+  const file = anchor % 8;
+  const rank = Math.floor(anchor / 8);
+  if (file < 0 || file > 6 || rank < 0 || rank > 6) return [];
+  return [anchor, anchor + 1, anchor + 8, anchor + 9];
+}
+
+function titanAnchorAtSquare(board, square) {
+  const piece = board?.[square];
+  if (piece?.tags?.includes("titan")) return square;
+  if (!piece?.tags?.includes("titanBody")) return null;
+  const candidates = [square, square - 1, square - 8, square - 9].filter((sq) => sq >= 0 && sq < 64);
+  for (const candidate of candidates) {
+    const titan = board?.[candidate];
+    if (!titan?.tags?.includes("titan")) continue;
+    if (titanFootprint(candidate).includes(square)) return candidate;
+  }
+  return null;
+}
+
+function titanBounds(anchor) {
+  const footprint = titanFootprint(anchor).map((sq) => squareToCanvasCenter(sq));
+  const xs = footprint.map((p) => p.x);
+  const ys = footprint.map((p) => p.y);
+  return {
+    left: Math.min(...xs),
+    right: Math.max(...xs),
+    top: Math.min(...ys),
+    bottom: Math.max(...ys),
+  };
+}
+
+function titanAnchorFromCanvasPoint(anchors, px, py) {
+  const point = canvasPoint(px, py);
+  const size = els.canvas.width / 8;
+  for (const anchor of anchors || []) {
+    const box = titanBounds(anchor);
+    const left = box.left - size / 2;
+    const right = box.right + size / 2;
+    const top = box.top - size / 2;
+    const bottom = box.bottom + size / 2;
+    if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom) return anchor;
+  }
+  return null;
 }
 
 function stopConfetti() {
@@ -1311,10 +1366,7 @@ function algebraic(sq) {
 }
 
 function canvasToSquare(px, py) {
-  const rect = els.canvas.getBoundingClientRect();
-  const x = ((px - rect.left) / rect.width) * els.canvas.width;
-  const y = ((py - rect.top) / rect.height) * els.canvas.height;
-
+  const { x, y } = canvasPoint(px, py);
   const size = els.canvas.width / 8;
   let file = Math.floor(x / size);
   let rank = 7 - Math.floor(y / size);
@@ -1324,6 +1376,14 @@ function canvasToSquare(px, py) {
     rank = 7 - rank;
   }
   return rank * 8 + file;
+}
+
+function canvasPoint(px, py) {
+  const rect = els.canvas.getBoundingClientRect();
+  return {
+    x: ((px - rect.left) / rect.width) * els.canvas.width,
+    y: ((py - rect.top) / rect.height) * els.canvas.height,
+  };
 }
 
 function squareToCanvasCenter(sq) {
@@ -2006,19 +2066,49 @@ function draw() {
 
   // Highlights.
   if (state.selected != null) {
-    const c = squareToCanvasCenter(state.selected);
-    ctx.strokeStyle = "rgba(123,211,255,0.9)";
-    ctx.lineWidth = 6;
-    ctx.strokeRect(c.x - size / 2 + 3, c.y - size / 2 + 3, size - 6, size - 6);
+    const selectedPiece = s.board[state.selected];
+    if (selectedPiece?.tags?.includes("titan")) {
+      const box = titanBounds(state.selected);
+      ctx.strokeStyle = "rgba(123,211,255,0.9)";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(box.left - size / 2 + 3, box.top - size / 2 + 3, box.right - box.left + size - 6, box.bottom - box.top + size - 6);
+    } else {
+      const c = squareToCanvasCenter(state.selected);
+      ctx.strokeStyle = "rgba(123,211,255,0.9)";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(c.x - size / 2 + 3, c.y - size / 2 + 3, size - 6, size - 6);
+    }
   }
   if (state.legalTo && state.selected != null) {
+    const selectedPiece = s.board[state.selected];
     for (const to of state.legalTo) {
       if (fogVisible && !fogVisible.has(to)) continue;
-      const c = squareToCanvasCenter(to);
-      ctx.fillStyle = "rgba(123,211,255,0.25)";
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, size * 0.14, 0, Math.PI * 2);
-      ctx.fill();
+      if (selectedPiece?.tags?.includes("titan")) {
+        const box = titanBounds(to);
+        ctx.fillStyle = "rgba(123,211,255,0.16)";
+        ctx.strokeStyle = "rgba(123,211,255,0.38)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.roundRect(box.left - size / 2 + 7, box.top - size / 2 + 7, box.right - box.left + size - 14, box.bottom - box.top + size - 14, 10);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        const c = squareToCanvasCenter(to);
+        ctx.fillStyle = "rgba(123,211,255,0.25)";
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, size * 0.14, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  if (s.phase === "mutantFusion" && s.mutantFusion?.playerId === state.playerId) {
+    for (const sq of s.mutantFusion.selected || []) {
+      const c = squareToCanvasCenter(sq);
+      ctx.strokeStyle = "rgba(255, 79, 139, 0.95)";
+      ctx.lineWidth = 5;
+      ctx.strokeRect(c.x - size / 2 + 7, c.y - size / 2 + 7, size - 14, size - 14);
+      ctx.fillStyle = "rgba(255, 79, 139, 0.16)";
+      ctx.fillRect(c.x - size / 2 + 8, c.y - size / 2 + 8, size - 16, size - 16);
     }
   }
 
@@ -2091,6 +2181,10 @@ function draw() {
         ? s.pendingTargetRule?.playerId === state.playerId
           ? (s.pendingTargetRule.prompt || "Choose a target")
           : "Opponent choosing a rule target"
+      : s.phase === "mutantFusion"
+        ? s.mutantFusion?.playerId === state.playerId
+          ? "Select pieces to fuse"
+          : "Opponent making a mutant"
       : s.phase === "pawnSoldierShot"
         ? s.pendingPawnSoldierShot?.playerId === state.playerId
           ? "Click a square to fire"
@@ -2374,6 +2468,11 @@ function pieceGlyph(type, color, colourBlind = false) {
   return (colourBlind ? map[type]?.w : map[type]?.[color]) || "?";
 }
 
+function pieceGlyphsFor(p, colourBlind = false) {
+  const types = Array.isArray(p?.movesAs) && p.movesAs.length ? p.movesAs : [p?.type];
+  return [...new Set(types)].map((type) => pieceGlyph(type, p.color, colourBlind)).filter((glyph) => glyph && glyph !== "?");
+}
+
 function pieceSkinFor(p) {
   return profileForColor(p?.color)?.pieceSkin || "Standard";
 }
@@ -2570,7 +2669,6 @@ function drawPieceAt(x, y, p, sq = null) {
 
   drawPieceSkinBase(x, y, size, p, pieceStyle);
 
-  ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = pieceStyle.fill;
@@ -2580,9 +2678,36 @@ function drawPieceAt(x, y, p, sq = null) {
     ctx.shadowBlur = size * 0.08;
   }
   ctx.lineWidth = 4;
-  const glyph = pieceGlyph(p.type, p.color, colourBlind);
-  ctx.strokeText(glyph, x, y + 2);
-  ctx.fillText(glyph, x, y);
+  const mutantGlyphs = p.tags?.includes("mutant") ? pieceGlyphsFor(p, colourBlind).slice(0, 5) : null;
+  if (mutantGlyphs?.length > 1) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.sin(nowMs() / 420 + (sq || 0)) * 0.08);
+    ctx.font = `${Math.floor(size * 0.36)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
+    const spots = [
+      [0, -0.18],
+      [-0.18, 0.08],
+      [0.18, 0.08],
+      [-0.08, 0.28],
+      [0.12, 0.28],
+    ];
+    mutantGlyphs.forEach((glyph, i) => {
+      const [ox, oy] = spots[i] || [0, 0];
+      ctx.strokeText(glyph, ox * size, oy * size + 2);
+      ctx.fillText(glyph, ox * size, oy * size);
+    });
+    ctx.strokeStyle = "rgba(255, 79, 139, 0.86)";
+    ctx.lineWidth = Math.max(2, size * 0.025);
+    ctx.beginPath();
+    ctx.arc(0, size * 0.03, size * 0.37, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
+    const glyph = pieceGlyph(p.type, p.color, colourBlind);
+    ctx.strokeText(glyph, x, y + 2);
+    ctx.fillText(glyph, x, y);
+  }
   ctx.shadowBlur = 0;
 
   // Rule icon (tiny dot).
@@ -2648,26 +2773,21 @@ function drawPieceAt(x, y, p, sq = null) {
 
 function drawTitanPiece(sq, p) {
   const size = els.canvas.width / 8;
-  const file = sq % 8;
-  const rank = Math.floor(sq / 8);
-  const anchor = squareToCanvasCenter(sq);
-  const right = file < 7 ? squareToCanvasCenter(sq + 1) : anchor;
-  const up = rank < 7 ? squareToCanvasCenter(sq + 8) : anchor;
-  const centerX = (anchor.x + right.x) / 2;
-  const centerY = (anchor.y + up.y) / 2;
+  const box = titanBounds(sq);
+  const centerX = (box.left + box.right) / 2;
+  const centerY = (box.top + box.bottom) / 2;
 
   ctx.save();
   ctx.fillStyle = "rgba(255, 209, 102, 0.22)";
   ctx.strokeStyle = "rgba(255, 209, 102, 0.72)";
   ctx.lineWidth = 5;
   ctx.beginPath();
-  ctx.roundRect(centerX - size, centerY - size, size * 2, size * 2, size * 0.12);
+  ctx.roundRect(box.left - size / 2, box.top - size / 2, box.right - box.left + size, box.bottom - box.top + size, size * 0.12);
   ctx.fill();
   ctx.stroke();
 
   const pieceStyle = pieceSkinStyle(p, !!state.serverState?.colourBlind);
   drawPieceSkinBase(centerX, centerY, size * 1.55, p, pieceStyle);
-  ctx.font = `${Math.floor(size * 1.05)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = pieceStyle.fill;
@@ -2677,9 +2797,31 @@ function drawTitanPiece(sq, p) {
     ctx.shadowBlur = size * 0.16;
   }
   ctx.lineWidth = 7;
-  const glyph = pieceGlyph(p.type, p.color, !!state.serverState?.colourBlind);
-  ctx.strokeText(glyph, centerX, centerY + 4);
-  ctx.fillText(glyph, centerX, centerY);
+  const mutantGlyphs = p.tags?.includes("mutant") ? pieceGlyphsFor(p, !!state.serverState?.colourBlind).slice(0, 5) : null;
+  if (mutantGlyphs?.length > 1) {
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(Math.sin(nowMs() / 420 + sq) * 0.06);
+    ctx.font = `${Math.floor(size * 0.62)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
+    const spots = [
+      [0, -0.34],
+      [-0.34, 0.02],
+      [0.34, 0.02],
+      [-0.14, 0.38],
+      [0.18, 0.38],
+    ];
+    mutantGlyphs.forEach((glyph, i) => {
+      const [ox, oy] = spots[i] || [0, 0];
+      ctx.strokeText(glyph, ox * size, oy * size + 3);
+      ctx.fillText(glyph, ox * size, oy * size);
+    });
+    ctx.restore();
+  } else {
+    ctx.font = `${Math.floor(size * 1.05)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
+    const glyph = pieceGlyph(p.type, p.color, !!state.serverState?.colourBlind);
+    ctx.strokeText(glyph, centerX, centerY + 4);
+    ctx.fillText(glyph, centerX, centerY);
+  }
   ctx.restore();
 }
 
@@ -2698,6 +2840,36 @@ function renderCards() {
   els.activeCards.innerHTML = "";
   for (const r of s.activeRules || []) {
     els.activeCards.appendChild(buildRuleCard(r, { pickable: false }));
+  }
+}
+
+function renderMutant() {
+  const s = state.serverState;
+  const fusion = s?.mutantFusion;
+  const active = !!fusion?.active;
+  if (els.mutantModal) els.mutantModal.hidden = !active;
+  if (!active) return;
+
+  const mine = fusion.playerId === state.playerId;
+  const selected = fusion.selected || [];
+  if (els.mutantStatus) {
+    els.mutantStatus.textContent = mine
+      ? `Click your pieces on the board. Selected: ${selected.length}`
+      : "Opponent is choosing pieces to fuse.";
+  }
+  if (els.mutantSelected) {
+    els.mutantSelected.innerHTML = "";
+    for (const sq of selected) {
+      const p = s.board?.[sq];
+      const chip = document.createElement("div");
+      chip.className = "mutantChip";
+      chip.textContent = `${PIECE_GLYPH_MONO[p?.type] || "?"} ${sqToAlg(sq)}`;
+      els.mutantSelected.appendChild(chip);
+    }
+  }
+  if (els.mutantConfirmBtn) {
+    els.mutantConfirmBtn.disabled = !mine || selected.length === 0;
+    els.mutantConfirmBtn.textContent = mine ? "Confirm fusion" : "Waiting...";
   }
 }
 
@@ -2733,6 +2905,8 @@ function ruleArtIcon(ruleId, ruleName) {
   if (hay.includes("suicide bomber")) return "\u{1F4A3}";
   if (hay.includes("explod") || hay.includes("bomb") || hay.includes("purge")) return "\u{1F4A5}";
   if (hay.includes("titan")) return "\u{1F4AA}";
+  if (hay.includes("mutant")) return "\u2723";
+  if (hay.includes("mystery") || hay.includes("box")) return "?";
   if (hay.includes("reset")) return "\u21BA";
   if (hay.includes("fan")) return "\u{1F32C}";
   if (hay.includes("lava")) return "\u{1F30B}";
@@ -2786,6 +2960,35 @@ function buildRuleCard(r, { pickable }) {
 
   bindCardFX(div);
   return div;
+}
+
+function ruleCardFromEffect(effect) {
+  const id = effect.ruleId || "";
+  const active = (state.serverState?.activeRules || []).find((r) => r.id === id);
+  const choiceLists = Object.values(state.serverState?.ruleChoicesByPlayerId || {}).flat();
+  const choice = choiceLists.find((r) => r.id === id);
+  const name = active?.name || choice?.name || String(effect.text || "").replace(/\s*\((active|scheduled)\)\s*$/i, "").replace(/\s+triggers!$/i, "");
+  return {
+    id,
+    name,
+    description: active?.description || choice?.description || "Rule fired.",
+    kind: active?.kind || choice?.kind || effect.ruleKind || "instant",
+    typeLabel: active?.typeLabel || choice?.typeLabel || effect.typeLabel || "Rule",
+    remaining: active?.remaining ?? choice?.remaining ?? null,
+  };
+}
+
+function showCardPopup(effect) {
+  if (!els.cardPopupLayer || effect.showCard === false) return;
+  const card = buildRuleCard(ruleCardFromEffect(effect), { pickable: false });
+  const wrap = document.createElement("div");
+  wrap.className = "cardPopup";
+  wrap.style.setProperty("--card-popup-enter-ms", `${CARD_POPUP_ENTER_MS}ms`);
+  wrap.style.setProperty("--card-popup-exit-ms", `${CARD_POPUP_EXIT_MS}ms`);
+  wrap.appendChild(card);
+  els.cardPopupLayer.appendChild(wrap);
+  setTimeout(() => wrap.classList.add("leaving"), CARD_POPUP_ENTER_MS);
+  setTimeout(() => wrap.remove(), CARD_POPUP_HOLD_MS + CARD_POPUP_EXIT_MS);
 }
 
 function bindCardFX(card) {
@@ -3285,6 +3488,7 @@ function syncUI() {
     els.plyInfo.textContent = "0";
     els.gameMsg.textContent = "Syncing...";
     els.activeCards.innerHTML = "";
+    if (els.mutantModal) els.mutantModal.hidden = true;
     els.choiceArea.hidden = true;
     document.body.classList.remove("is-choosing");
     document.body.classList.remove("is-debug-choice");
@@ -3321,6 +3525,9 @@ function syncUI() {
         ? "Pawn Soldier: click a square to fire"
         : "Opponent firing Pawn Soldier";
   }
+  if (s.phase === "mutantFusion") {
+    els.gameMsg.textContent = s.mutantFusion?.playerId === state.playerId ? "Mutant: select pieces to fuse" : "Opponent is making a mutant";
+  }
 
   state.flipVisual = (state.color === "b") !== !!s.visualFlip;
 
@@ -3333,13 +3540,17 @@ function syncUI() {
   if (els.sideLabelBottom) els.sideLabelBottom.innerHTML = renderBoardName(topIsWhite ? blackPlayer : whitePlayer);
   applyGameCosmetics();
   els.canvas.style.cursor =
-    s.phase === "pawnSoldierShot" && s.pendingPawnSoldierShot?.playerId === state.playerId ? "crosshair" : "";
+    (s.phase === "pawnSoldierShot" && s.pendingPawnSoldierShot?.playerId === state.playerId) ||
+    (s.phase === "mutantFusion" && s.mutantFusion?.playerId === state.playerId)
+      ? "crosshair"
+      : "";
 
   renderCards();
   renderChoice();
   renderRps();
   renderWager();
   renderSupermarket();
+  renderMutant();
 
   // Result modal.
   const ri = s.resultInfo;
@@ -3404,6 +3615,7 @@ function handleEffects() {
     }
     if (e.type === "rule") {
       playSound("rule");
+      showCardPopup(e);
       logLine(`<strong>Rule</strong>: ${escapeHtml(e.text)}`);
     }
   }
@@ -3657,6 +3869,14 @@ els.supermarketCheckoutBtn?.addEventListener("click", () => {
   });
 });
 
+els.mutantConfirmBtn?.addEventListener("click", () => {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:mutantConfirm", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) logLine(`<strong>Mutant</strong>: ${escapeHtml(res?.error || "fusion failed")}`);
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+});
+
 els.canvas.addEventListener("mousedown", (ev) => {
   if (!state.serverState || !state.lobby) return;
   const s = state.serverState;
@@ -3666,6 +3886,20 @@ els.canvas.addEventListener("mousedown", (ev) => {
     const square = canvasToSquare(ev.clientX, ev.clientY);
     socket.emit("game:ruleTarget", { code: state.lobby, playerId: state.playerId, square }, (res) => {
       if (!res?.ok) logLine(`<strong>Target</strong>: ${escapeHtml(res?.error || "target rejected")}`);
+      socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+    });
+    return;
+  }
+  if (s.phase === "mutantFusion") {
+    const fusion = s.mutantFusion;
+    if (!fusion || fusion.playerId !== state.playerId) return;
+    const square = canvasToSquare(ev.clientX, ev.clientY);
+    const piece = s.board[square];
+    if (!piece || piece.color !== state.color || piece.color === "x") return;
+    const current = fusion.selected || [];
+    const next = current.includes(square) ? current.filter((sq) => sq !== square) : [...current, square];
+    socket.emit("game:mutantSelection", { code: state.lobby, playerId: state.playerId, squares: next }, (res) => {
+      if (!res?.ok) logLine(`<strong>Mutant</strong>: ${escapeHtml(res?.error || "selection rejected")}`);
       socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
     });
     return;
@@ -3684,7 +3918,14 @@ els.canvas.addEventListener("mousedown", (ev) => {
   if (s.turn !== state.color) return;
   if (s.result) return;
 
-  const sq = canvasToSquare(ev.clientX, ev.clientY);
+  const selectedPiece = state.selected != null ? s.board[state.selected] : null;
+  const titanMoveTarget =
+    selectedPiece?.tags?.includes("titan") && state.legalTo?.length
+      ? titanAnchorFromCanvasPoint(state.legalTo, ev.clientX, ev.clientY)
+      : null;
+  const rawSq = canvasToSquare(ev.clientX, ev.clientY);
+  const titanAnchor = titanAnchorAtSquare(s.board, rawSq);
+  const sq = titanMoveTarget ?? titanAnchor ?? rawSq;
   const piece = s.board[sq];
 
   if (state.selected == null) {

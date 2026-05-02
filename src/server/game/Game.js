@@ -21,6 +21,7 @@ function serializeBoard(board) {
           type: p.type,
           color: p.color,
           tags: p.tags,
+          movesAs: p.movesAs ? [...p.movesAs] : null,
           hp: typeof p._hp === "number" ? p._hp : null,
           maxHp: typeof p._maxHp === "number" ? p._maxHp : null,
         }
@@ -46,7 +47,7 @@ function deepCloneState(game) {
   return {
     state: {
       ...game.state,
-      board: game.state.board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined } : null)),
+      board: game.state.board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined, movesAs: p.movesAs ? [...p.movesAs] : undefined } : null)),
       castling: { w: { ...game.state.castling.w }, b: { ...game.state.castling.b } },
     },
     ply: game.ply,
@@ -94,7 +95,7 @@ class Game {
 
     this.state = initialState();
     this.ply = 0;
-    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "pawnSoldierShot" | "supermarket" | "rps" | "wager"
+    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "mutantFusion" | "pawnSoldierShot" | "supermarket" | "rps" | "wager"
 
     this.result = null;
     this.resultInfo = null;
@@ -136,6 +137,7 @@ class Game {
     this.history = [];
     this.pendingTargetRules = [];
     this.pendingPawnSoldierShot = null;
+    this.mutantFusion = null;
     this.backupPlanActive = { w: false, b: false };
     this.matchStats = {
       captures: { w: 0, b: 0 },
@@ -215,6 +217,7 @@ class Game {
     this.requestTimeReverse = 0;
     this.pendingTargetRules = [];
     this.pendingPawnSoldierShot = null;
+    this.mutantFusion = null;
     this.backupPlanActive = { w: false, b: false };
     this.ghostSquares = new Set();
     this.stickySquares = new Set();
@@ -295,6 +298,22 @@ class Game {
     const r = idxToRank(anchor);
     if (f < 0 || f > 6 || r < 0 || r > 6) return [];
     return [anchor, toIdx(f + 1, r), toIdx(f, r + 1), toIdx(f + 1, r + 1)];
+  }
+
+  titanAnchorAtSquare(square) {
+    if (square == null || square < 0 || square > 63) return null;
+    const piece = this.state.board[square];
+    if (this.isTitan(piece)) return square;
+    if (!this.isTitanBody(piece)) return null;
+
+    const candidates = [square, square - 1, square - 8, square - 9]
+      .filter((sq) => sq >= 0 && sq < 64);
+    for (const candidate of candidates) {
+      const titan = this.state.board[candidate];
+      if (!this.isTitan(titan)) continue;
+      if (this.titanFootprint(candidate).includes(square)) return candidate;
+    }
+    return null;
   }
 
   isTitan(piece) {
@@ -463,6 +482,81 @@ class Game {
     return { ok: true };
   }
 
+  startMutantFusion(playerId, color) {
+    if (!this.started || this.result) return { ok: false, error: "Game not active" };
+    const candidates = [];
+    for (let sq = 0; sq < 64; sq++) {
+      const piece = this.state.board[sq];
+      if (piece && piece.color === color && piece.color !== "x" && !this.isTitanBody(piece)) candidates.push(sq);
+    }
+    if (!candidates.length) {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Mutant fizzled: no pieces were available." });
+      return { ok: true };
+    }
+    this.mutantFusion = { playerId, color, selected: [] };
+    this.phase = "mutantFusion";
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `${color === "w" ? "White" : "Black"} is choosing pieces to fuse.` });
+    return { ok: true };
+  }
+
+  setMutantSelection(playerId, squares) {
+    if (this.phase !== "mutantFusion" || !this.mutantFusion) return { ok: false, error: "No mutant fusion active" };
+    if (this.mutantFusion.playerId !== playerId) return { ok: false, error: "Waiting for the other player to choose" };
+    const color = this.playerColor(playerId);
+    if (color !== this.mutantFusion.color) return { ok: false, error: "Bad player" };
+
+    const uniq = [...new Set((Array.isArray(squares) ? squares : []).map((sq) => Math.floor(Number(sq))))].filter((sq) => sq >= 0 && sq < 64);
+    for (const sq of uniq) {
+      const piece = this.state.board[sq];
+      if (!piece || piece.color !== color || piece.color === "x" || this.isTitanBody(piece)) return { ok: false, error: "Select only your own pieces" };
+    }
+    this.mutantFusion.selected = uniq;
+    return { ok: true };
+  }
+
+  confirmMutantFusion(playerId) {
+    if (this.phase !== "mutantFusion" || !this.mutantFusion) return { ok: false, error: "No mutant fusion active" };
+    if (this.mutantFusion.playerId !== playerId) return { ok: false, error: "Waiting for the other player to choose" };
+    const color = this.mutantFusion.color;
+    const selected = (this.mutantFusion.selected || []).filter((sq) => {
+      const piece = this.state.board[sq];
+      return piece && piece.color === color && piece.color !== "x" && !this.isTitanBody(piece);
+    });
+    if (!selected.length) return { ok: false, error: "Select at least one piece" };
+
+    const anchor = selected[0];
+    const pieces = selected.map((sq) => this.state.board[sq]).filter(Boolean);
+    const movesAs = [...new Set(pieces.flatMap((p) => (Array.isArray(p.movesAs) && p.movesAs.length ? p.movesAs : [p.type])).filter((type) => ["p", "n", "b", "r", "q", "k"].includes(type)))];
+    const includesKing = movesAs.includes("k");
+    const strongest = [...movesAs].sort((a, b) => {
+      const av = a === "k" ? -1 : require("./ChessEngine").pieceValue(a);
+      const bv = b === "k" ? -1 : require("./ChessEngine").pieceValue(b);
+      return bv - av;
+    })[0] || pieces[0].type;
+    const tags = [...new Set(pieces.flatMap((p) => p.tags || []).filter((tag) => tag !== "titanBody").concat("mutant"))];
+    const sourceBackup = pieces.find((p) => p._backupVital);
+
+    const mutant = {
+      ...pieces[0],
+      type: includesKing ? "k" : strongest,
+      color,
+      moved: true,
+      tags,
+      movesAs,
+    };
+    if (sourceBackup?._backupVital) mutant._backupVital = sourceBackup._backupVital;
+
+    for (const sq of selected) this.state.board[sq] = null;
+    this.state.board[anchor] = mutant;
+
+    this.mutantFusion = null;
+    this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: selected.slice(1), reason: "mutant" });
+    this.effects.push({ type: "rule", id: this.nextEffectId(), ruleId: "inst_mutant", text: `${color === "w" ? "White" : "Black"} fused ${selected.length} piece(s) into a mutant.` });
+    this.evaluateGameEnd();
+    this.resumePendingRuleWorkOrPlay();
+    return { ok: true };
+  }
+
   findBackupVitalSquare(color) {
     if (!this.backupPlanActive?.[color]) return null;
     for (let i = 0; i < 64; i++) {
@@ -617,19 +711,51 @@ class Game {
     return mods;
   }
 
+  legalMovesForState(state, color, mods) {
+    const base = generateLegalMoves(state, color, mods);
+    const seen = new Set(base.map((m) => `${m.from}:${m.to}:${m.promotion || ""}`));
+    const out = [...base];
+
+    for (let from = 0; from < 64; from++) {
+      const piece = state.board[from];
+      if (!piece || piece.color !== color || !Array.isArray(piece.movesAs) || piece.movesAs.length <= 1) continue;
+      for (const type of piece.movesAs) {
+        if (!["p", "n", "b", "r", "q", "k"].includes(type) || type === piece.type) continue;
+        const originalType = piece.type;
+        piece.type = type;
+        const legalAsType = generateLegalMoves(state, color, mods).filter((m) => m.from === from);
+        piece.type = originalType;
+        for (const move of legalAsType) {
+          const key = `${move.from}:${move.to}:${move.promotion || ""}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push(move);
+        }
+      }
+    }
+
+    return out;
+  }
+
+  legalMovesForColor(color, mods) {
+    return this.legalMovesForState(this.state, color, mods);
+  }
+
   getLegalDestinations(playerId, from) {
     if (this.phase !== "play" || this.result) return [];
     const color = this.playerColor(playerId);
     if (!color) return [];
     if (color !== this.state.turn) return [];
     if (from == null || from < 0 || from > 63) return [];
+    const titanAnchor = this.titanAnchorAtSquare(from);
+    if (titanAnchor != null) from = titanAnchor;
     const p = this.state.board[from];
     if (!p || p.color !== color) return [];
     if (this.isTitan(p)) return this.getTitanLegalDestinations(from, color);
 
     const mods = this.currentModifiers();
     if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
-    const legal = generateLegalMoves(this.state, color, mods);
+    const legal = this.legalMovesForColor(color, mods);
     return legal.filter((m) => m.from === from).map((m) => m.to);
   }
 
@@ -1094,7 +1220,7 @@ class Game {
 
     const color = this.state.turn;
     const mods = this.currentModifiers();
-    const legal = generateLegalMoves(this.state, color, mods);
+    const legal = this.legalMovesForColor(color, mods);
     if (legal.length === 0) {
       const inCheck = require("./ChessEngine").isInCheck(this.state, color, mods);
       if (inCheck && this.backupPlanActive?.[color] && this.findBackupVitalSquare(color) != null) return false;
@@ -1356,24 +1482,58 @@ class Game {
       const occupant = board[sq];
       if (!occupant) continue;
       if (currentFootprint.has(sq)) continue;
-      if (occupant.color === "x") return false;
-      if (occupant.color === color) return false;
       if (occupant.type === "k") return false;
+      if (this.isTitan(occupant) || this.isTitanBody(occupant)) return false;
     }
     return true;
   }
 
-  titanMoveLeavesKingSafe(from, to, color) {
-    const board = this.state.board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined } : null));
+  titanMovementState(from) {
+    const board = this.state.board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined, movesAs: p.movesAs ? [...p.movesAs] : undefined } : null));
     const piece = board[from];
     const currentFootprint = new Set(this.titanFootprint(from));
     for (const sq of currentFootprint) {
-      if (sq !== from && this.isTitanBody(board[sq])) board[sq] = null;
+      if (sq !== from) board[sq] = null;
     }
+    if (piece) {
+      piece.tags = (piece.tags || []).filter((tag) => tag !== "titan" && tag !== "titanBody");
+    }
+    return { ...this.state, board };
+  }
+
+  normalizeTitanMoveTarget(from, clickedSquare, color) {
+    if (clickedSquare == null || clickedSquare < 0 || clickedSquare > 63) return null;
+    const legalAnchors = this.getTitanLegalDestinations(from, color);
+    if (!legalAnchors.length) return null;
+
+    if (legalAnchors.includes(clickedSquare)) return clickedSquare;
+
+    const matches = legalAnchors.filter((anchor) => this.titanFootprint(anchor).includes(clickedSquare));
+    if (!matches.length) return null;
+    if (matches.length === 1) return matches[0];
+
+    const clickedFile = idxToFile(clickedSquare);
+    const clickedRank = idxToRank(clickedSquare);
+    matches.sort((a, b) => {
+      const af = idxToFile(a) + 0.5;
+      const ar = idxToRank(a) + 0.5;
+      const bf = idxToFile(b) + 0.5;
+      const br = idxToRank(b) + 0.5;
+      const da = Math.abs(af - clickedFile) + Math.abs(ar - clickedRank);
+      const db = Math.abs(bf - clickedFile) + Math.abs(br - clickedRank);
+      return da - db;
+    });
+    return matches[0];
+  }
+
+  titanMoveLeavesKingSafe(from, to, color) {
+    const nextState = this.titanMovementState(from);
+    const board = nextState.board;
+    const piece = board[from];
     for (const sq of this.titanFootprint(to)) board[sq] = null;
-    board[to] = piece ? { ...piece, moved: true, tags: piece.tags ? [...piece.tags] : undefined } : null;
+    board[from] = null;
+    board[to] = piece ? { ...piece, moved: true, tags: piece.tags ? [...piece.tags] : undefined, movesAs: piece.movesAs ? [...piece.movesAs] : undefined } : null;
     for (const sq of this.titanFootprint(to).slice(1)) board[sq] = { type: "x", color: "x", moved: true, tags: ["titanBody"] };
-    const nextState = { ...this.state, board };
     return !require("./ChessEngine").isInCheck(nextState, color, this.currentModifiers());
   }
 
@@ -1381,59 +1541,16 @@ class Game {
     const piece = this.state.board[from];
     if (!this.isTitan(piece)) return [];
     const currentFootprint = new Set(this.titanFootprint(from));
-    const type = piece._titanOriginalType || piece.type;
-    const file = idxToFile(from);
-    const rank = idxToRank(from);
     const candidates = new Set();
+    const movementState = this.titanMovementState(from);
+    const legal = this.legalMovesForState(movementState, color, this.currentModifiers())
+      .filter((move) => move.from === from)
+      .map((move) => move.to);
 
-    const add = (f, r) => {
-      if (f < 0 || f > 6 || r < 0 || r > 6) return;
-      const to = toIdx(f, r);
-      if (!this.titanCanOccupy(this.state.board, to, color, currentFootprint)) return;
-      if (!this.titanMoveLeavesKingSafe(from, to, color)) return;
+    for (const to of legal) {
+      if (!this.titanCanOccupy(this.state.board, to, color, currentFootprint)) continue;
+      if (!this.titanMoveLeavesKingSafe(from, to, color)) continue;
       candidates.add(to);
-    };
-
-    const addRay = (df, dr) => {
-      for (let step = 1; step <= 7; step++) {
-        const f = file + df * step;
-        const r = rank + dr * step;
-        if (f < 0 || f > 6 || r < 0 || r > 6) break;
-        const to = toIdx(f, r);
-        if (!this.titanCanOccupy(this.state.board, to, color, currentFootprint)) break;
-        add(f, r);
-        const footprint = this.titanFootprint(to);
-        if (footprint.some((sq) => this.state.board[sq] && !currentFootprint.has(sq))) break;
-      }
-    };
-
-    const diagonals = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
-    const orth = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-
-    if (type === "p") {
-      const dir = color === "w" ? 1 : -1;
-      add(file, rank + dir);
-      add(file, rank + dir * 2);
-      add(file + 1, rank + dir);
-      add(file - 1, rank + dir);
-      add(file + 2, rank + dir * 2);
-      add(file - 2, rank + dir * 2);
-    } else if (type === "n") {
-      const jumps = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
-      for (const [df, dr] of jumps) {
-        add(file + df, rank + dr);
-        add(file + df * 2, rank + dr * 2);
-      }
-    } else if (type === "k") {
-      for (const [df, dr] of diagonals.concat(orth)) {
-        add(file + df, rank + dr);
-        add(file + df * 2, rank + dr * 2);
-      }
-    } else {
-      const dirs = [];
-      if (type === "b" || type === "q") dirs.push(...diagonals);
-      if (type === "r" || type === "q") dirs.push(...orth);
-      for (const [df, dr] of dirs) addRay(df, dr);
     }
 
     return [...candidates].filter((sq) => sq !== from);
@@ -1451,7 +1568,7 @@ class Game {
     this.state.board[from] = null;
     for (const sq of newFootprint) {
       const occupant = this.state.board[sq];
-      if (occupant && occupant.color !== piece.color && occupant.color !== "x") destroyed.push(sq);
+      if (occupant && occupant.type !== "k") destroyed.push(sq);
       this.state.board[sq] = null;
     }
 
@@ -1676,6 +1793,7 @@ class Game {
       color: p.color,
       moved: true,
       tags: p.tags ? [...p.tags] : undefined,
+      movesAs: p.movesAs ? [...p.movesAs] : undefined,
     });
 
     for (const sq of pathSquares) {
@@ -1695,6 +1813,8 @@ class Game {
     if (color !== this.state.turn) return { ok: false, error: "Not your turn" };
     if (from == null || to == null) return { ok: false, error: "Bad move" };
 
+    const titanAnchor = this.titanAnchorAtSquare(from);
+    if (titanAnchor != null) from = titanAnchor;
     const piece = this.state.board[from];
     if (!piece || piece.color !== color) return { ok: false, error: "No piece" };
     if (piece._stickyLocked) return { ok: false, error: "That piece is stuck this turn" };
@@ -1702,6 +1822,9 @@ class Game {
 
     const mods = this.currentModifiers();
     if (this.isTitan(piece)) {
+      const titanTarget = this.normalizeTitanMoveTarget(from, to, color);
+      if (titanTarget == null) return { ok: false, error: "Illegal titan move" };
+      to = titanTarget;
       const legalTitan = this.getTitanLegalDestinations(from, color);
       if (!legalTitan.includes(to)) return { ok: false, error: "Illegal titan move" };
 
@@ -1763,7 +1886,7 @@ class Game {
     }
 
     if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
-    const legal = generateLegalMoves(this.state, color, mods);
+    const legal = this.legalMovesForColor(color, mods);
     const isLegal = legal.some((m) => m.from === from && m.to === to);
     if (!isLegal) return { ok: false, error: "Illegal move" };
 
@@ -2055,6 +2178,14 @@ class Game {
             playerId: this.pendingPawnSoldierShot.playerId,
             color: this.pendingPawnSoldierShot.color,
             from: this.pendingPawnSoldierShot.from,
+          }
+        : null,
+      mutantFusion: this.mutantFusion
+        ? {
+            active: true,
+            playerId: this.mutantFusion.playerId,
+            color: this.mutantFusion.color,
+            selected: [...(this.mutantFusion.selected || [])],
           }
         : null,
       supermarkets: this.supermarkets.map((market) => ({ square: market.square, instanceId: market.instanceId })),

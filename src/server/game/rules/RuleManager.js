@@ -96,7 +96,7 @@ class RuleManager {
     const inst = { instanceId: `R${this.instanceSeq++}`, ruleId: r.id, kind: r.kind, remaining: null, triggerIn: null, data: {} };
 
     if (r.kind === "instant") {
-      this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: r.name });
+      this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), ruleId: r.id, ruleKind: kindClass(r), typeLabel: ruleTypeLabel(r), text: r.name });
       r.apply?.(this.game, { flags: {}, ...ctx });
       if (r.permanentCard) {
         this.active.push({ instanceId: `P${this.instanceSeq++}`, ruleId: r.id, kind: "permanent", remaining: null, triggerIn: null, data: {} });
@@ -108,14 +108,14 @@ class RuleManager {
       inst.triggerIn = r.delayTurns;
       r.onSchedule?.(this.game, inst);
       this.active.push(inst);
-      this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} (scheduled)` });
+      this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), ruleId: r.id, ruleKind: kindClass(r), typeLabel: ruleTypeLabel(r), showCard: false, text: `${r.name} (scheduled)` });
       return { ok: true, applied: "delayed" };
     }
 
     if (r.kind === "duration") {
       inst.remaining = r.durationTurns;
       this.active.push(inst);
-      this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} (active)` });
+      this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), ruleId: r.id, ruleKind: kindClass(r), typeLabel: ruleTypeLabel(r), text: `${r.name} (active)` });
       r.apply?.(this.game, { flags: {}, inst, ...ctx });
       return { ok: true, applied: "duration" };
     }
@@ -137,7 +137,7 @@ class RuleManager {
         r.onTick?.(this.game, inst);
         inst.triggerIn -= 1;
         if (inst.triggerIn <= 0) {
-          this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), text: `${r.name} triggers!` });
+          this.game.effects.push({ type: "rule", id: this.game.nextEffectId(), ruleId: r.id, ruleKind: kindClass(r), typeLabel: ruleTypeLabel(r), text: `${r.name} triggers!` });
           r.apply?.(this.game, { flags: {}, inst });
           if (r.becomesPermanent) {
             inst.kind = "permanent";

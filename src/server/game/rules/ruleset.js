@@ -430,7 +430,7 @@ const RULES = [
     id: "inst_titan",
     kind: "instant",
     name: "Titan",
-    description: "Choose one of your pieces. It becomes a 2x2 titan, deleting anything in its way and gaining extended movement.",
+    description: "Choose one of your pieces. It becomes a 2x2 titan that can stride 1 or 2 squares in any direction, crushing pieces it lands on.",
     apply(game, ctx) {
       game.enqueueTargetRule?.({
         ruleId: "inst_titan",
@@ -438,6 +438,15 @@ const RULES = [
         color: ctx?.color,
         prompt: "Choose one of your pieces to become a titan.",
       });
+    },
+  },
+  {
+    id: "inst_mutant",
+    kind: "instant",
+    name: "Mutant",
+    description: "Choose any number of your pieces, then confirm. They fuse into one mutant with all their legal movement.",
+    apply(game, ctx) {
+      game.startMutantFusion?.(ctx?.playerId, ctx?.color);
     },
   },
   {
@@ -1079,7 +1088,7 @@ const RULES = [
     onSchedule(game, inst) {
       // Snapshot current piece positions only (not counts — pieces that die stay dead).
       inst.data.snapshot = game.state.board.map((p) =>
-        p ? { type: p.type, color: p.color, moved: p.moved, tags: p.tags ? [...p.tags] : undefined } : null
+        p ? { type: p.type, color: p.color, moved: p.moved, tags: p.tags ? [...p.tags] : undefined, movesAs: p.movesAs ? [...p.movesAs] : undefined } : null
       );
       game.effects.push({ type: "log", id: game.nextEffectId(), text: "Copycat Delayed: position snapshot taken." });
     },
@@ -1101,12 +1110,42 @@ const RULES = [
         if (!p || p.color === "x") continue;
         const key = `${p.color}${p.type}`;
         if ((placedCounts[key] || 0) < (liveCounts[key] || 0)) {
-          next[i] = { ...p, tags: p.tags ? [...p.tags] : undefined };
+          next[i] = { ...p, tags: p.tags ? [...p.tags] : undefined, movesAs: p.movesAs ? [...p.movesAs] : undefined };
           placedCounts[key] = (placedCounts[key] || 0) + 1;
         }
       }
       game.state.board = next;
       game.effects.push({ type: "rule", id: game.nextEffectId(), text: "Copycat Delayed: positions rewound!" });
+    },
+  },
+
+  {
+    id: "del_mystery_box_4",
+    kind: "delayed",
+    delayTurns: 4,
+    name: "Mystery Box",
+    description: "In 4 turns, each player gets one random bonus instant rule auto-fired.",
+    apply(game) {
+      const autoSafe = new Set([
+        "inst_pot_of_greed",
+        "inst_coinflip_wager",
+        "inst_rps_duel",
+        "inst_titan",
+        "inst_mutant",
+        "inst_pawn_soldier",
+        "inst_suicide_bomber",
+        "inst_lawnmower",
+        "inst_backup_plan",
+      ]);
+      const instantRules = RULES.filter((r) => r.kind === "instant" && !autoSafe.has(r.id));
+      for (const color of ["w", "b"]) {
+        const player = game.players?.find((p) => p.color === color);
+        const rule = instantRules[randInt(instantRules.length)];
+        if (!player || !rule) continue;
+        game.effects.push({ type: "log", id: game.nextEffectId(), text: `Mystery Box opened for ${color === "w" ? "White" : "Black"}: ${rule.name}.` });
+        game.noteRuleUse?.(color, rule.id);
+        game.ruleManager?.addRule(rule.id, { playerId: player.id, color });
+      }
     },
   },
 

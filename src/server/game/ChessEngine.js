@@ -15,7 +15,7 @@ function toIdx(file, rank) {
 }
 
 function cloneBoard(board) {
-  return board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined } : null));
+  return board.map((p) => (p ? { ...p, tags: p.tags ? [...p.tags] : undefined, movesAs: p.movesAs ? [...p.movesAs] : undefined } : null));
 }
 
 function other(color) {
@@ -30,6 +30,12 @@ function pieceValue(type) {
   if (type === "p") return 1;
   if (type === "k") return 100;
   return 0;
+}
+
+function pieceCanMoveAs(piece, type) {
+  if (!piece) return false;
+  if (piece.type === type) return true;
+  return Array.isArray(piece.movesAs) && piece.movesAs.includes(type);
 }
 
 function normalizeModifiers(mods) {
@@ -101,7 +107,7 @@ function isSquareAttacked(state, square, byColor, mods) {
         const p = board[idx];
         if (!p) continue;
         if (p.color !== byColor || p.color === "x") break;
-        if (attackerTypes.includes(p.type) || (p.type === "k" && step === 0 && attackerTypes.includes("k"))) return true;
+        if (attackerTypes.some((type) => pieceCanMoveAs(p, type)) || (pieceCanMoveAs(p, "k") && step === 0 && attackerTypes.includes("k"))) return true;
         break;
       }
     }
@@ -125,7 +131,7 @@ function isSquareAttacked(state, square, byColor, mods) {
     const idx = toIdx(nf, nr);
     if (isMissing(mods, idx)) continue;
     const p = board[idx];
-    if (p && p.color === byColor && p.type === "n") return true;
+    if (p && p.color === byColor && pieceCanMoveAs(p, "n")) return true;
   }
 
   // Pawns (attack direction depends on attacker).
@@ -136,7 +142,7 @@ function isSquareAttacked(state, square, byColor, mods) {
     const idx = toIdx(nf, nr);
     if (isMissing(mods, idx)) continue;
     const p = board[idx];
-    if (p && p.color === byColor && p.type === "p") return true;
+    if (p && p.color === byColor && pieceCanMoveAs(p, "p")) return true;
   }
 
   // King adjacent
@@ -148,7 +154,7 @@ function isSquareAttacked(state, square, byColor, mods) {
       const idx = toIdx(nf, nr);
       if (isMissing(mods, idx)) continue;
       const p = board[idx];
-      if (p && p.color === byColor && p.type === "k") return true;
+      if (p && p.color === byColor && pieceCanMoveAs(p, "k")) return true;
     }
   }
 
@@ -229,7 +235,7 @@ function applyMoveNoValidation(state, move, mods) {
   }
 
   // Castling move rook.
-  if (piece && piece.type === "k" && Math.abs(idxToFile(to) - idxToFile(from)) === 2) {
+  if (piece && piece.type === "k" && !piece.tags?.includes("mutant") && Math.abs(idxToFile(to) - idxToFile(from)) === 2) {
     const rank = idxToRank(from);
     if (idxToFile(to) === 6) {
       // king side
@@ -248,7 +254,7 @@ function applyMoveNoValidation(state, move, mods) {
   }
 
   // Normal capture.
-  board[to] = piece ? { ...piece, moved: true } : null;
+  board[to] = piece ? { ...piece, moved: true, tags: piece.tags ? [...piece.tags] : undefined, movesAs: piece.movesAs ? [...piece.movesAs] : undefined } : null;
   board[from] = null;
 
   // Update castling rights on king/rook moves (only meaningful when not wrapping).
