@@ -707,6 +707,29 @@ body.is-in-game:not(.is-choosing) #gamePanel {
   text-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
 }
 
+.boardNameButton {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 3px 7px 3px 3px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-shadow: inherit;
+  cursor: pointer;
+}
+
+.boardNameButton:hover,
+.boardNameButton:focus-visible {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(5, 12, 25, 0.42);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+}
+
 .boardNameAvatar {
   position: relative;
   flex: 0 0 auto;

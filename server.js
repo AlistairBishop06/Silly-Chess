@@ -649,10 +649,10 @@ function applyAccountToPlayer(player, account) {
   player.profile = publicPlayerProfile(account);
 }
 
-function publicUser(user) {
+function publicUser(user, { awardAchievements = true } = {}) {
   hydrateUser(user);
   if (!user) return null;
-  const achievementState = buildAchievementsForUser(user, { award: true });
+  const achievementState = buildAchievementsForUser(user, { award: awardAchievements });
   if (achievementState.awardedCoins > 0) saveUsers(userStore);
   const tier = tierForRating(user.stats.rating);
   const winRate = user.stats.gamesCompleted ? Math.round((user.stats.wins / user.stats.gamesCompleted) * 100) : 0;
@@ -841,6 +841,16 @@ app.get("/api/rules", (_req, res) => {
     remaining: r.kind === "duration" ? r.durationTurns : r.kind === "delayed" ? r.delayTurns : null,
   }));
   res.json({ ok: true, rules: cards });
+});
+
+app.get("/api/users/:username/profile", (req, res) => {
+  const key = usernameKey(req.params.username);
+  const user = userStore.users[key];
+  if (!user) return res.status(404).json({ ok: false, error: "Player not found." });
+  const profile = publicUser(user, { awardAchievements: false });
+  delete profile.isAdmin;
+  delete profile.cosmetics;
+  res.json({ ok: true, user: profile });
 });
 
 app.post("/api/auth/signup", async (req, res) => {

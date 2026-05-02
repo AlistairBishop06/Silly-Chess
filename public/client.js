@@ -133,6 +133,8 @@ const state = {
   account: null,
   authMode: "login",
   profileTab: "overview",
+  viewedProfile: null,
+  viewedProfileReadOnly: false,
   lastProfileResultKey: null,
   adminUsers: null,
   adminFlags: null,
@@ -421,8 +423,31 @@ function ensureSignedIn() {
 function openProfileModal() {
   if (!state.account) return openAuthModal("login");
   if (!els.profileModal) return;
+  state.viewedProfile = null;
+  state.viewedProfileReadOnly = false;
   renderProfile();
   els.profileModal.hidden = false;
+}
+
+async function openPlayerProfile(player) {
+  if (!player || !els.profileModal) return;
+  if (player.id === state.playerId) return openProfileModal();
+
+  state.viewedProfileReadOnly = true;
+  state.viewedProfile = playerFallbackProfile(player);
+  if (["settings", "admin", "cosmetics"].includes(state.profileTab)) state.profileTab = "overview";
+  renderProfile();
+  els.profileModal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(player.name || "")}/profile`, { cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || !json?.ok || !json.user) throw new Error(json?.error || "Profile unavailable.");
+    state.viewedProfile = json.user;
+    renderProfile();
+  } catch (err) {
+    logLine(`<strong>Profile</strong>: ${escapeHtml(err.message || "Profile unavailable.")}`);
+  }
 }
 
 function closeProfileModal() {
@@ -430,10 +455,17 @@ function closeProfileModal() {
 }
 
 function renderProfile() {
-  const user = state.account;
+  const user = state.viewedProfile || state.account;
   if (!user || !els.profileContent) return;
-  if (els.adminTabBtn) els.adminTabBtn.hidden = !user.isAdmin;
-  if (state.profileTab === "admin" && !user.isAdmin) state.profileTab = "overview";
+  const readOnly = !!state.viewedProfileReadOnly;
+  els.profileTabs?.querySelectorAll("button[data-tab]").forEach((btn) => {
+    const privateTab = ["settings", "admin", "cosmetics"].includes(btn.dataset.tab);
+    btn.hidden = readOnly && privateTab;
+  });
+  if (els.adminTabBtn) els.adminTabBtn.hidden = readOnly || !user.isAdmin;
+  if ((state.profileTab === "admin" && !user.isAdmin) || (readOnly && ["settings", "admin", "cosmetics"].includes(state.profileTab))) {
+    state.profileTab = "overview";
+  }
   const profile = user.profile || {};
   const stats = user.stats || {};
   const rank = user.rank || {};
@@ -468,7 +500,30 @@ function renderProfile() {
 
   const tab = state.profileTab || "overview";
   els.profileTabs?.querySelectorAll("button").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
-  els.profileContent.innerHTML = hero + renderProfileTab(user, tab, winRate);
+  els.profileContent.innerHTML = hero + renderProfileTab(user, tab, winRate, readOnly);
+}
+
+function playerFallbackProfile(player) {
+  const p = player.profile || {};
+  return {
+    username: player.name || "Player",
+    createdAt: null,
+    profile: {
+      avatar: p.avatar || (player.name || "?").slice(0, 2).toUpperCase(),
+      banner: p.banner || "Sunset Clash",
+      country: "",
+      bio: player.name === "Chaos Bot" ? "Local chaos engine. Surprisingly judgmental about hanging queens." : "Profile details are loading.",
+      onlineStatus: "In match",
+      border: p.border || "None",
+    },
+    stats: {},
+    rank: { rating: 1000, tier: "Unranked", progress: 0 },
+    matchHistory: [],
+    ruleCollection: [],
+    achievements: [],
+    social: { friends: [], rivals: [], clubs: [] },
+    insights: {},
+  };
 }
 
 function bannerClass(name) {
@@ -494,7 +549,7 @@ function statTile(label, value) {
   return `<div><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
-function renderProfileTab(user, tab, winRate) {
+function renderProfileTab(user, tab, winRate, readOnly = false) {
   const s = user.stats || {};
   if (tab === "stats") return renderStatsTab(user, winRate);
   if (tab === "history") return renderHistoryTab(user);
@@ -535,10 +590,10 @@ function renderProfileTab(user, tab, winRate) {
         <div class="friendList">
           ${(user.social?.friends || []).map((name) => `<div><span>${escapeHtml(name)}</span><button type="button" disabled>Challenge</button></div>`).join("") || `<div><span>No friends to challenge yet.</span></div>`}
         </div>
-        <div class="friendRow">
+        ${readOnly ? "" : `<div class="friendRow">
           <input id="friendUsername" placeholder="Friend username" maxlength="16" autocomplete="off" />
           <button id="addFriendBtn" type="button">Add friend</button>
-        </div>
+        </div>`}
       </section>
       <section class="profileSection">
         <h3>Performance Insights</h3>
@@ -628,7 +683,10 @@ function renderRulesTab(user) {
   const rules = user.ruleCollection || [];
   return `
     <section class="profileSection wide">
-      <h3>Rule Collection</h3>
+      <div class="shopHeader">
+        <h3>Rule Collection</h3>
+        <button id="openRuleAppendixBtn" type="button">View rule appendix</button>
+      </div>
       <div class="profileStats">
         ${statTile("rules discovered", n(rules.length))}
         ${statTile("rare cards", n(rules.filter((r) => r.rare).length))}
@@ -3192,8 +3250,10 @@ function renderBoardName(player) {
   const emote = currentEmote(player.id);
   const cls = ["boardNameAvatar", borderClass(profile)].filter(Boolean).join(" ");
   return `
-    <span class="${escapeAttr(cls)}">${escapeHtml(avatar)}</span>
-    <span class="boardNameText">${escapeHtml(player.name || "Player")}</span>
+    <button class="boardNameButton" type="button" data-player-id="${escapeAttr(player.id || "")}" title="View ${escapeAttr(player.name || "player")} profile">
+      <span class="${escapeAttr(cls)}">${escapeHtml(avatar)}</span>
+      <span class="boardNameText">${escapeHtml(player.name || "Player")}</span>
+    </button>
     ${emote ? `<span class="boardNameEmote">${escapeHtml(emote)}</span>` : ""}
   `;
 }
@@ -3458,6 +3518,7 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (target?.id === "saveProfileBtn") saveProfileSettings();
   if (target?.id === "changePasswordBtn") changePassword();
   if (target?.id === "addFriendBtn") addFriend();
+  if (target?.id === "openRuleAppendixBtn") openRulebook();
   if (target?.id === "deleteAccountBtn") deleteAccount();
   if (target?.id === "adminLoadFlagsBtn") adminLoadFlags();
   if (target?.id === "adminRefreshUsersBtn") adminRefreshUsers();
@@ -3476,6 +3537,14 @@ els.profileContent?.addEventListener("input", (ev) => {
   const target = ev.target;
   if (target?.id === "adminUserJson") adminUpdateDraft(target.value);
 });
+function handleBoardNameClick(ev) {
+  const btn = ev.target?.closest?.(".boardNameButton");
+  if (!btn) return;
+  const player = playerForId(btn.dataset.playerId);
+  if (player) openPlayerProfile(player);
+}
+els.sideLabelTop?.addEventListener("click", handleBoardNameClick);
+els.sideLabelBottom?.addEventListener("click", handleBoardNameClick);
 els.shopOffers?.addEventListener("click", (ev) => {
   const buyBtn = ev.target?.closest?.(".buyCosmeticBtn");
   if (buyBtn) buyCosmetic(buyBtn.dataset.buyGroup, buyBtn.dataset.buyName);
