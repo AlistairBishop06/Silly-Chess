@@ -911,6 +911,28 @@ function rarityLabel(rarity) {
   return "Common";
 }
 
+function shopRarityRank(rarity) {
+  if (rarity === "legendary") return 4;
+  if (rarity === "epic") return 3;
+  if (rarity === "rare") return 2;
+  return 1;
+}
+
+function featuredShopIndex(offers) {
+  if (!Array.isArray(offers) || !offers.length) return -1;
+  return offers.reduce((bestIndex, item, index) => {
+    if (bestIndex < 0) return index;
+    const rarity = shopRarityRank(shopRarityForItem(item));
+    const best = offers[bestIndex];
+    const bestRarity = shopRarityRank(shopRarityForItem(best));
+    if (rarity !== bestRarity) return rarity > bestRarity ? index : bestIndex;
+    const price = Number(item?.price || 0);
+    const bestPrice = Number(best?.price || 0);
+    if (price !== bestPrice) return price > bestPrice ? index : bestIndex;
+    return bestIndex;
+  }, -1);
+}
+
 function shopItemDescription(item) {
   const name = item?.label || item?.name || "this cosmetic";
   const group = String(item?.group || "");
@@ -933,15 +955,20 @@ function renderDailyShop() {
     return;
   }
   const user = state.account || {};
-  els.shopOffers.innerHTML = shop.offers
-    .map((item) => {
+  const featureIndex = featuredShopIndex(shop.offers);
+  const orderedOffers =
+    featureIndex >= 0
+      ? [shop.offers[featureIndex], ...shop.offers.filter((_, index) => index !== featureIndex)]
+      : shop.offers;
+  els.shopOffers.innerHTML = orderedOffers
+    .map((item, index) => {
       const owned = !!item.owned;
       const affordable = !!item.affordable;
       const rarity = shopRarityForItem(item);
       const description = shopItemDescription(item);
       const disabled = owned || !affordable ? "disabled" : "";
       const status = owned ? "Owned" : affordable ? "Ready to unlock" : "Need more coins";
-      const layoutClass = rarity === "legendary" || rarity === "epic" ? "shopFeatureTall" : "shopFeatureCompact";
+      const layoutClass = index === 0 ? "shopFeatureTall" : "shopFeatureCompact";
       return `
         <div class="dailyShopItem ${owned ? "owned" : ""} rarity-${escapeAttr(rarity)} ${layoutClass}">
           <div class="shopRarityBadge">${rarityLabel(rarity)}</div>
@@ -966,7 +993,7 @@ function renderDailyShop() {
     })
     .join("");
   if (els.shopStatus) {
-    els.shopStatus.innerHTML = `<span class="shopBalancePill">Balance: ${coinsText(user)} coins</span><span class="shopSubtle">Epic and legendary items get the spotlight</span>`;
+    els.shopStatus.innerHTML = `<span class="shopBalancePill">Balance: ${coinsText(user)} coins</span><span class="shopSubtle">Rarest daily item featured</span>`;
   }
 }
 
