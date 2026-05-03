@@ -170,23 +170,26 @@ const PIECE_GLYPH_MONO = {
 };
 
 function sqToAlg(sq) {
-  const file = sq % 8;
-  const rank = Math.floor(sq / 8);
+  const size = boardSize();
+  const file = sq % size;
+  const rank = Math.floor(sq / size);
   return String.fromCharCode(97 + file) + String(rank + 1);
 }
 
 function titanFootprint(anchor) {
-  const file = anchor % 8;
-  const rank = Math.floor(anchor / 8);
-  if (file < 0 || file > 6 || rank < 0 || rank > 6) return [];
-  return [anchor, anchor + 1, anchor + 8, anchor + 9];
+  const size = boardSize();
+  const file = anchor % size;
+  const rank = Math.floor(anchor / size);
+  if (file < 0 || file > size - 2 || rank < 0 || rank > size - 2) return [];
+  return [anchor, anchor + 1, anchor + size, anchor + size + 1];
 }
 
 function titanAnchorAtSquare(board, square) {
   const piece = board?.[square];
   if (piece?.tags?.includes("titan")) return square;
   if (!piece?.tags?.includes("titanBody")) return null;
-  const candidates = [square, square - 1, square - 8, square - 9].filter((sq) => sq >= 0 && sq < 64);
+  const size = boardSize();
+  const candidates = [square, square - 1, square - size, square - size - 1].filter((sq) => sq >= 0 && sq < (board || []).length);
   for (const candidate of candidates) {
     const titan = board?.[candidate];
     if (!titan?.tags?.includes("titan")) continue;
@@ -209,7 +212,7 @@ function titanBounds(anchor) {
 
 function titanAnchorFromCanvasPoint(anchors, px, py) {
   const point = canvasPoint(px, py);
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   for (const anchor of anchors || []) {
     const box = titanBounds(anchor);
     const left = box.left - size / 2;
@@ -1568,7 +1571,7 @@ function playSound(type) {
 }
 
 function spawnParticles(squares, color) {
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   for (const sq of squares) {
     const { x, y } = squareToCanvasCenter(sq);
     for (let i = 0; i < 16; i++) {
@@ -1589,22 +1592,30 @@ function spawnParticles(squares, color) {
 }
 
 function algebraic(sq) {
-  const file = sq % 8;
-  const rank = Math.floor(sq / 8);
+  const size = boardSize();
+  const file = sq % size;
+  const rank = Math.floor(sq / size);
   return String.fromCharCode(97 + file) + (rank + 1);
 }
 
+function boardSize() {
+  const size = Number(state.serverState?.boardSize || 8);
+  return Number.isInteger(size) && size >= 8 ? size : 8;
+}
+
 function canvasToSquare(px, py) {
+  const boardN = boardSize();
   const { x, y } = canvasPoint(px, py);
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardN;
   let file = Math.floor(x / size);
-  let rank = 7 - Math.floor(y / size);
+  let rank = boardN - 1 - Math.floor(y / size);
+  if (file < 0 || file >= boardN || rank < 0 || rank >= boardN) return -1;
 
   if (state.flipVisual) {
-    file = 7 - file;
-    rank = 7 - rank;
+    file = boardN - 1 - file;
+    rank = boardN - 1 - rank;
   }
-  return rank * 8 + file;
+  return rank * boardN + file;
 }
 
 function canvasPoint(px, py) {
@@ -1616,15 +1627,16 @@ function canvasPoint(px, py) {
 }
 
 function squareToCanvasCenter(sq) {
-  const size = els.canvas.width / 8;
-  let file = sq % 8;
-  let rank = Math.floor(sq / 8);
+  const boardN = boardSize();
+  const size = els.canvas.width / boardN;
+  let file = sq % boardN;
+  let rank = Math.floor(sq / boardN);
   if (state.flipVisual) {
-    file = 7 - file;
-    rank = 7 - rank;
+    file = boardN - 1 - file;
+    rank = boardN - 1 - rank;
   }
   const x = (file + 0.5) * size;
-  const y = (7 - rank + 0.5) * size;
+  const y = (boardN - 1 - rank + 0.5) * size;
   return { x, y };
 }
 
@@ -1759,7 +1771,7 @@ function isFriendlyFireActive(s) {
 
 function drawTileGlyph(sq, drawFn) {
   const { x, y } = squareToCanvasCenter(sq);
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   ctx.save();
   drawFn(x, y, size);
   ctx.restore();
@@ -1901,7 +1913,7 @@ function drawStickyTile(sq, t) {
 function drawFanVisual(fan, t) {
   const rank = fan.rank;
   if (rank == null) return;
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   const y = squareToCanvasCenter(toIdxSafe(0, rank)).y;
   const blowingRight = state.flipVisual ? fan.dir < 0 : fan.dir > 0;
   const fanX = blowingRight ? -size * 0.16 : els.canvas.width + size * 0.16;
@@ -1944,7 +1956,7 @@ function drawFanVisual(fan, t) {
 
 function drawBoardEffects(s, t) {
   const ids = activeRuleIds(s);
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
 
   if (ids.has("dur_ice_board_5")) {
     const g = ctx.createLinearGradient(0, 0, els.canvas.width, els.canvas.height);
@@ -1976,7 +1988,7 @@ function drawBoardEffects(s, t) {
     ctx.strokeStyle = "rgba(156, 255, 107, 0.24)";
     ctx.lineWidth = Math.max(2, size * 0.022);
     const down = !state.flipVisual;
-    for (let file = 0; file < 8; file++) {
+    for (let file = 0; file < boardSize(); file++) {
       const x = squareToCanvasCenter(toIdxSafe(file, 0)).x;
       ctx.beginPath();
       ctx.moveTo(x, size * 0.18);
@@ -2265,7 +2277,8 @@ function draw() {
   if (!state.serverState) return;
 
   const s = state.serverState;
-  const size = els.canvas.width / 8;
+  const boardN = boardSize();
+  const size = els.canvas.width / boardN;
   const t = nowMs();
   const fogVisible =
     s.fogOfWar && s.fogOfWarSquares && state.color ? new Set(s.fogOfWarSquares[state.color] || []) : null;
@@ -2274,10 +2287,11 @@ function draw() {
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
 
   // Board.
-  for (let rank = 0; rank < 8; rank++) {
-    for (let file = 0; file < 8; file++) {
+  for (let rank = 0; rank < boardN; rank++) {
+    for (let file = 0; file < boardN; file++) {
       const light = (rank + file) % 2 === 0;
-      const sq = rank * 8 + file;
+      const sq = rank * boardN + file;
+      if ((s.missingSquares || []).includes(sq)) continue;
       let { x, y } = squareToCanvasCenter(sq);
       x -= size / 2;
       y -= size / 2;
@@ -2344,7 +2358,7 @@ function draw() {
   // Pieces.
   const titans = [];
   const animatedTargets = animationHiddenSquares(t);
-  for (let sq = 0; sq < 64; sq++) {
+  for (let sq = 0; sq < (s.board || []).length; sq++) {
     if (animatedTargets.has(sq)) continue;
     const p = s.board[sq];
     if (!p) continue;
@@ -2484,9 +2498,9 @@ function drawAnimations(t) {
       y = p < 0.5 ? a.y : b.y;
       ctx.globalAlpha = Math.max(0.18, Math.min(1, fade));
       ctx.strokeStyle = "rgba(196, 141, 255, 0.72)";
-      ctx.lineWidth = Math.max(3, els.canvas.width / 8 * 0.045);
+      ctx.lineWidth = Math.max(3, els.canvas.width / boardSize() * 0.045);
       ctx.beginPath();
-      ctx.arc(x, y, els.canvas.width / 8 * (0.2 + Math.sin(p * Math.PI) * 0.34), 0, Math.PI * 2);
+      ctx.arc(x, y, els.canvas.width / boardSize() * (0.2 + Math.sin(p * Math.PI) * 0.34), 0, Math.PI * 2);
       ctx.stroke();
     } else {
       ctx.globalAlpha = 0.94;
@@ -2523,7 +2537,7 @@ function queueSupplyDrop(effect) {
 
 function drawSupplyDrops(t) {
   const next = [];
-  const tile = els.canvas.width / 8;
+  const tile = els.canvas.width / boardSize();
   for (const drop of state.supplyDrops) {
     if (t < drop.start) {
       next.push(drop);
@@ -2615,7 +2629,7 @@ function queueBullets(effect) {
 
 function drawBullets(t) {
   const next = [];
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   for (const bullet of state.bullets) {
     if (t < bullet.start) {
       next.push(bullet);
@@ -2659,7 +2673,7 @@ function queueLawnmower(effect) {
 
 function drawLawnmowers(t) {
   const next = [];
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   for (const mower of state.lawnmowers) {
     const p = Math.min(1, Math.max(0, (t - mower.start) / Math.max(1, mower.end - mower.start)));
     const y = squareToCanvasCenter(toIdxSafe(0, mower.row)).y;
@@ -2863,7 +2877,7 @@ function drawPiece(sq, p) {
 }
 
 function drawPieceAt(x, y, p, sq = null) {
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   const colourBlind = !!(state.serverState && state.serverState.colourBlind);
   const shieldCharges =
     p?.type === "k" && p?.color && state.serverState?.shield && typeof state.serverState.shield[p.color] === "number"
@@ -3001,7 +3015,7 @@ function drawPieceAt(x, y, p, sq = null) {
 }
 
 function drawTitanPiece(sq, p) {
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   const box = titanBounds(sq);
   const centerX = (box.left + box.right) / 2;
   const centerY = (box.top + box.bottom) / 2;
@@ -3056,7 +3070,7 @@ function drawTitanPiece(sq, p) {
 
 function drawBlock(sq) {
   const { x, y } = squareToCanvasCenter(sq);
-  const size = els.canvas.width / 8;
+  const size = els.canvas.width / boardSize();
   ctx.fillStyle = "rgba(0,0,0,0.38)";
   ctx.fillRect(x - size * 0.34, y - size * 0.34, size * 0.68, size * 0.68);
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
@@ -3280,7 +3294,7 @@ function updateChoiceTimer() {
 }
 
 function toIdxSafe(file, rank) {
-  return rank * 8 + file;
+  return rank * boardSize() + file;
 }
 
 function updateRpsTimer() {
@@ -3415,7 +3429,7 @@ function renderWager() {
 
   const yourSquares = [];
   const oppSquares = [];
-  for (let sq = 0; sq < 64; sq++) {
+  for (let sq = 0; sq < (s.board || []).length; sq++) {
     const p = s.board?.[sq];
     if (!p) continue;
     if (p.color === "x") continue;

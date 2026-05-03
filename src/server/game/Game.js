@@ -6,6 +6,7 @@ const {
   idxToFile,
   idxToRank,
   toIdx,
+  boardSizeOf,
 } = require("./ChessEngine");
 const { RuleManager } = require("./rules/RuleManager");
 const { getRuleById } = require("./rules/ruleset");
@@ -27,6 +28,10 @@ function serializeBoard(board) {
         }
       : null
   );
+}
+
+function remapSet(set, mapSquare) {
+  return new Set([...set].map(mapSquare).filter((sq) => typeof sq === "number" && sq >= 0));
 }
 
 const DEMOTE_TYPE = { q: "r", r: "b", b: "n", n: "p", p: "p" };
@@ -54,6 +59,7 @@ function deepCloneState(game) {
     permanent: { ...game.permanent },
     hazards: { deadly: [...game.hazards.deadly], lava: [...game.hazards.lava], asteroid: [...game.hazards.asteroid] },
     missingSquares: [...game.missingSquares],
+    landExpansionCount: game.landExpansionCount || 0,
     extraMoves: { ...game.extraMoves },
     shield: { ...game.shield },
     marks: {
@@ -122,6 +128,7 @@ class Game {
 
     this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
     this.missingSquares = new Set();
+    this.landExpansionCount = 0;
     this.marks = { lightning: new Set(), blackHole: new Set(), plague: new Set(), swap: new Set() };
     this.fans = [];
     this.ghostSquares = new Set();
@@ -192,6 +199,9 @@ class Game {
 
   resetBoardState({ keepRules }) {
     this.removeTitanBodies();
+    const persistentLandExpansions = keepRules
+      ? this.ruleManager.active.filter((inst) => inst.ruleId === "del_land_expansion_10" && inst.kind === "permanent").length
+      : 0;
     this.state = initialState();
     this.ply = 0;
     this.result = null;
@@ -222,17 +232,22 @@ class Game {
     this.ghostSquares = new Set();
     this.stickySquares = new Set();
     this.supermarkets = [];
+    this.missingSquares = new Set();
+    this.landExpansionCount = 0;
 
     if (!keepRules) {
       this.ruleManager = new RuleManager(this);
       this.permanent = defaultPermanentFlags();
       this.hazards = { deadly: new Set(), lava: new Set(), asteroid: new Set() };
       this.missingSquares = new Set();
+      this.landExpansionCount = 0;
       this.marks = { lightning: new Set(), blackHole: new Set(), plague: new Set(), swap: new Set() };
       this.fans = [];
       this.ghostSquares = new Set();
       this.stickySquares = new Set();
       this.supermarkets = [];
+    } else {
+      for (let i = 0; i < persistentLandExpansions; i++) this.expandBoard(4, { silent: true });
     }
   }
 
@@ -716,7 +731,7 @@ class Game {
     const seen = new Set(base.map((m) => `${m.from}:${m.to}:${m.promotion || ""}`));
     const out = [...base];
 
-    for (let from = 0; from < 64; from++) {
+    for (let from = 0; from < state.board.length; from++) {
       const piece = state.board[from];
       if (!piece || piece.color !== color || !Array.isArray(piece.movesAs) || piece.movesAs.length <= 1) continue;
       for (const type of piece.movesAs) {
@@ -746,7 +761,7 @@ class Game {
     const color = this.playerColor(playerId);
     if (!color) return [];
     if (color !== this.state.turn) return [];
-    if (from == null || from < 0 || from > 63) return [];
+    if (from == null || from < 0 || from >= this.state.board.length) return [];
     const titanAnchor = this.titanAnchorAtSquare(from);
     if (titanAnchor != null) from = titanAnchor;
     const p = this.state.board[from];
@@ -1168,7 +1183,7 @@ class Game {
   }
 
   findKingSquare(color) {
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < this.state.board.length; i++) {
       const p = this.state.board[i];
       if (p && p.color === color && p.type === "k") return i;
     }
@@ -1402,11 +1417,13 @@ class Game {
 
   // Echo Chamber: mirror each move across the vertical axis (file 0↔7, 1↔6, etc.)
   applyEchoChamberMove(from, to) {
-    const mf = 7 - idxToFile(from);
-    const mr = idxToRank(from);
-    const mirrorFrom = toIdx(mf, mr);
-    const mt = 7 - idxToFile(to);
-    const mirrorTo = toIdx(mt, idxToRank(to));
+    const size = boardSizeOf(this.state);
+    const fromFile = from % size;
+    const fromRank = Math.floor(from / size);
+    const toFile = to % size;
+    const toRank = Math.floor(to / size);
+    const mirrorFrom = fromRank * size + (size - 1 - fromFile);
+    const mirrorTo = toRank * size + (size - 1 - toFile);
 
     if (this.missingSquares.has(mirrorFrom) || this.missingSquares.has(mirrorTo)) return;
 
@@ -1420,8 +1437,21 @@ class Game {
       this.effects.push({ type: "explosion", id: this.nextEffectId(), squares: [mirrorTo], reason: "echoChamber" });
     }
 
-    this.state.board[mirrorTo] = { ...piece, moved: true };
+    this.state.board[mirrorTo] = {
+      ...piece,
+      moved: true,
+      tags: piece.tags ? [...piece.tags] : undefined,
+      movesAs: piece.movesAs ? [...piece.movesAs] : undefined,
+    };
     this.state.board[mirrorFrom] = null;
+    this.effects.push({
+      type: "move",
+      style: "move",
+      id: this.nextEffectId(),
+      from: mirrorFrom,
+      to: mirrorTo,
+      piece: serializeBoard([this.state.board[mirrorTo]])[0],
+    });
     this.applyHazardsAfterMove(mirrorTo);
   }
 
@@ -1684,7 +1714,79 @@ class Game {
   }
 
   squareName(sq) {
-    return String.fromCharCode(97 + idxToFile(sq)) + String(idxToRank(sq) + 1);
+    const size = boardSizeOf(this.state);
+    return String.fromCharCode(97 + (sq % size)) + String(Math.floor(sq / size) + 1);
+  }
+
+  expandBoard(extra = 4, options = {}) {
+    const oldSize = boardSizeOf(this.state);
+    const growBy = Math.max(2, Number(extra) || 4);
+    const blockSize = growBy;
+    let ringSide = 2;
+    let offset = this.landExpansionCount || 0;
+    while (offset >= ringSide * 2 + 1) {
+      offset -= ringSide * 2 + 1;
+      ringSide += 1;
+    }
+    const targetBlock =
+      offset <= ringSide
+        ? { x: ringSide, y: offset }
+        : { x: ringSide - 1 - (offset - ringSide - 1), y: ringSide };
+    const newSize = Math.max(oldSize, (Math.max(targetBlock.x, targetBlock.y) + 1) * blockSize);
+    const mapSquare = (sq) => {
+      if (typeof sq !== "number" || sq < 0) return sq;
+      const file = sq % oldSize;
+      const rank = Math.floor(sq / oldSize);
+      return rank * newSize + file;
+    };
+    const nextBoard = Array(newSize * newSize).fill(null);
+    for (let sq = 0; sq < this.state.board.length; sq++) {
+      nextBoard[mapSquare(sq)] = this.state.board[sq];
+    }
+
+    const playableSquares = new Set();
+    for (let sq = 0; sq < this.state.board.length; sq++) {
+      if (!this.missingSquares.has(sq)) playableSquares.add(mapSquare(sq));
+    }
+    const patchSquares = new Set();
+    const patchStartFile = targetBlock.x * blockSize;
+    const patchStartRank = targetBlock.y * blockSize;
+    for (let rank = patchStartRank; rank < patchStartRank + blockSize; rank++) {
+      for (let file = patchStartFile; file < patchStartFile + blockSize; file++) {
+        const sq = rank * newSize + file;
+        patchSquares.add(sq);
+        playableSquares.add(sq);
+      }
+    }
+    const nextMissingSquares = new Set();
+    for (let sq = 0; sq < newSize * newSize; sq++) {
+      if (!playableSquares.has(sq)) nextMissingSquares.add(sq);
+    }
+
+    this.state = {
+      ...this.state,
+      boardSize: newSize,
+      board: nextBoard,
+      enPassant: this.state.enPassant == null ? null : mapSquare(this.state.enPassant),
+      lastMove: this.state.lastMove
+        ? { ...this.state.lastMove, from: mapSquare(this.state.lastMove.from), to: mapSquare(this.state.lastMove.to) }
+        : this.state.lastMove,
+    };
+
+    this.lastMoveSquares = (this.lastMoveSquares || []).map(mapSquare);
+    this.missingSquares = nextMissingSquares;
+    this.hazards.deadly = remapSet(this.hazards.deadly, mapSquare);
+    this.hazards.lava = remapSet(this.hazards.lava, mapSquare);
+    this.hazards.asteroid = remapSet(this.hazards.asteroid, mapSquare);
+    this.ghostSquares = remapSet(this.ghostSquares, mapSquare);
+    this.stickySquares = remapSet(this.stickySquares, mapSquare);
+    this.trailBlocks = (this.trailBlocks || []).map(mapSquare);
+    for (const key of Object.keys(this.marks || {})) this.marks[key] = remapSet(this.marks[key], mapSquare);
+    this.supermarkets = this.supermarkets.map((market) => ({ ...market, square: mapSquare(market.square) }));
+    if (this.supermarket) this.supermarket = { ...this.supermarket, square: mapSquare(this.supermarket.square) };
+    this.landExpansionCount = (this.landExpansionCount || 0) + 1;
+    if (!options.silent) this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Land Expansion added a 4x4 territory to the board edge.` });
+    return newSize;
   }
 
   timeReverseNow(plies) {
@@ -1698,6 +1800,7 @@ class Game {
     this.hazards.lava = new Set(snap.hazards.lava);
     this.hazards.asteroid = new Set(snap.hazards.asteroid || []);
     this.missingSquares = new Set(snap.missingSquares);
+    this.landExpansionCount = snap.landExpansionCount || 0;
     this.extraMoves = { ...snap.extraMoves };
     this.shield = { ...snap.shield };
     this.marks = {
@@ -1811,6 +1914,7 @@ class Game {
     if (!color) return { ok: false, error: "Unknown player" };
     if (color !== this.state.turn) return { ok: false, error: "Not your turn" };
     if (from == null || to == null) return { ok: false, error: "Bad move" };
+    if (from < 0 || from >= this.state.board.length || to < 0 || to >= this.state.board.length) return { ok: false, error: "Bad move" };
 
     const titanAnchor = this.titanAnchorAtSquare(from);
     if (titanAnchor != null) from = titanAnchor;
@@ -2092,7 +2196,7 @@ class Game {
     let visibleSquares = null;
     if (mods.invisiblePieces) {
       visibleSquares = new Set(this.lastMoveSquares);
-      for (let i = 0; i < 64; i++) if (this.state.board[i]?.type === "k") visibleSquares.add(i);
+      for (let i = 0; i < this.state.board.length; i++) if (this.state.board[i]?.type === "k") visibleSquares.add(i);
     }
 
     // Fog of War: per-player visibility. We send the union here for server state;
@@ -2134,6 +2238,7 @@ class Game {
       started: this.started,
       players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color, profile: p.profile || null })),
       board: serializeBoard(board),
+      boardSize: boardSizeOf(this.state),
       turn: this.state.turn,
       ply: this.ply,
       phase: this.phase,

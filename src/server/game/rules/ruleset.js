@@ -1437,6 +1437,17 @@ const RULES = [
       return { stickySquaresActive: true };
     },
   },
+  {
+    id: "del_land_expansion_10",
+    kind: "delayed",
+    delayTurns: 10,
+    becomesPermanent: true,
+    name: "Land Expansion",
+    description: "In 10 turns, a 4x4 territory is added around the board edge. Stacks loop around, completing larger square boards.",
+    apply(game) {
+      game.expandBoard?.(4);
+    },
+  },
 ];
 
 function getRuleById(id) {

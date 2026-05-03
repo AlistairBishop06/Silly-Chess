@@ -1255,7 +1255,7 @@ function botLegalMoves(game, playerId) {
   const color = game.playerColor(playerId);
   if (color !== "w" && color !== "b") return [];
   const moves = [];
-  for (let from = 0; from < 64; from++) {
+  for (let from = 0; from < game.state.board.length; from++) {
     const piece = game.state.board[from];
     if (!piece || piece.color !== color) continue;
     const toSquares = game.getLegalDestinations(playerId, from);
@@ -1275,7 +1275,7 @@ function cloneBotState(state) {
 
 function botMaterialScore(board, color) {
   let score = 0;
-  for (let sq = 0; sq < 64; sq++) {
+  for (let sq = 0; sq < board.length; sq++) {
     const p = board[sq];
     if (!p || p.color === "x") continue;
     const sign = p.color === color ? 1 : -1;
@@ -1291,27 +1291,29 @@ function botMaterialScore(board, color) {
 function botPositionalScore(board, color) {
   let score = 0;
   const forward = color === "w" ? 1 : -1;
-  for (let sq = 0; sq < 64; sq++) {
+  const size = Math.max(8, Math.round(Math.sqrt(board.length || 64)));
+  const center = (size - 1) / 2;
+  for (let sq = 0; sq < board.length; sq++) {
     const p = board[sq];
     if (!p || p.color === "x") continue;
     const sign = p.color === color ? 1 : -1;
-    const file = idxToFile(sq);
-    const rank = idxToRank(sq);
-    const centerDist = Math.abs(file - 3.5) + Math.abs(rank - 3.5);
+    const file = sq % size;
+    const rank = Math.floor(sq / size);
+    const centerDist = Math.abs(file - center) + Math.abs(rank - center);
     score += sign * (18 - centerDist * 4);
     if (p.type === "p") {
-      const progress = p.color === "w" ? rank : 7 - rank;
+      const progress = p.color === "w" ? rank : size - 1 - rank;
       score += sign * progress * 8;
     }
     if ((p.type === "n" || p.type === "b") && ((p.color === "w" && rank > 0) || (p.color === "b" && rank < 7))) {
       score += sign * 12;
     }
     if (p.type === "k") {
-      const homeRank = p.color === "w" ? 0 : 7;
+      const homeRank = p.color === "w" ? Math.floor((size - 8) / 2) : Math.floor((size - 8) / 2) + 7;
       const earlyShelter = rank === homeRank && (file === 6 || file === 2) ? 18 : 0;
       score += sign * earlyShelter;
     }
-    if (p.color === color && p.type === "p") score += (rank - 3.5) * forward;
+    if (p.color === color && p.type === "p") score += (rank - center) * forward;
   }
   return score;
 }
@@ -1345,7 +1347,9 @@ function botMoveScore(game, color, move, legalMoves) {
 
   let score = botEvaluateState(next, color, mods);
   if (target && target.color !== color) score += pieceValue(target.type) * 160 - pieceValue(piece?.type) * 12;
-  if (piece?.type === "p" && (idxToRank(move.to) === 0 || idxToRank(move.to) === 7)) score += 750;
+  const size = Math.max(8, Number(before.boardSize || Math.round(Math.sqrt(before.board.length || 64))));
+  const toRank = Math.floor(move.to / size);
+  if (piece?.type === "p" && (toRank === 0 || toRank === size - 1)) score += 750;
   if (isInCheck(next, opponent, mods)) score += 160;
 
   const replies = generateLegalMoves(next, opponent, mods);
@@ -1361,11 +1365,12 @@ function botMoveScore(game, color, move, legalMoves) {
   }
   if (Number.isFinite(bestReply)) score -= bestReply * 0.72;
 
-  const fromFile = idxToFile(move.from);
-  const fromRank = idxToRank(move.from);
-  const toFile = idxToFile(move.to);
-  const toRank = idxToRank(move.to);
-  const centerGain = Math.abs(fromFile - 3.5) + Math.abs(fromRank - 3.5) - (Math.abs(toFile - 3.5) + Math.abs(toRank - 3.5));
+  const fromFile = move.from % size;
+  const fromRank = Math.floor(move.from / size);
+  const toFile = move.to % size;
+  const centerRank = Math.floor(move.to / size);
+  const center = (size - 1) / 2;
+  const centerGain = Math.abs(fromFile - center) + Math.abs(fromRank - center) - (Math.abs(toFile - center) + Math.abs(centerRank - center));
   score += centerGain * 18;
 
   // Prefer varied choices among similarly strong moves.
