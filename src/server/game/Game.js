@@ -754,7 +754,6 @@ class Game {
     if (this.isTitan(p)) return this.getTitanLegalDestinations(from, color);
 
     const mods = this.currentModifiers();
-    if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
     const legal = this.legalMovesForColor(color, mods);
     return legal.filter((m) => m.from === from).map((m) => m.to);
   }
@@ -1885,7 +1884,6 @@ class Game {
       return { ok: true };
     }
 
-    if (mods.mirroredMoves && this.state.lastMove) mods.requiredMove = { ...this.state.lastMove };
     const legal = this.legalMovesForColor(color, mods);
     const isLegal = legal.some((m) => m.from === from && m.to === to);
     if (!isLegal) return { ok: false, error: "Illegal move" };

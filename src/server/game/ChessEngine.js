@@ -63,13 +63,32 @@ function stepWithWrap(file, rank, df, dr, wrapEdges, bumperBoard = false) {
   if (!wrapEdges) {
     if (onBoard(nf, nr)) return { nf, nr, ok: true };
     if (!bumperBoard) return { nf, nr, ok: false };
-    nf = file - df;
-    nr = rank - dr;
+    if (nf < 0 || nf > 7) df *= -1;
+    if (nr < 0 || nr > 7) dr *= -1;
+    nf = file + df;
+    nr = rank + dr;
     return { nf, nr, ok: onBoard(nf, nr) };
   }
   nf = (nf + 8) % 8;
   nr = (nr + 8) % 8;
   return { nf, nr, ok: true };
+}
+
+function stepWithDirection(file, rank, df, dr, wrapEdges, bumperBoard = false) {
+  let nf = file + df;
+  let nr = rank + dr;
+  if (!wrapEdges) {
+    if (onBoard(nf, nr)) return { nf, nr, df, dr, ok: true };
+    if (!bumperBoard) return { nf, nr, df, dr, ok: false };
+    if (nf < 0 || nf > 7) df *= -1;
+    if (nr < 0 || nr > 7) dr *= -1;
+    nf = file + df;
+    nr = rank + dr;
+    return { nf, nr, df, dr, ok: onBoard(nf, nr) };
+  }
+  nf = (nf + 8) % 8;
+  nr = (nr + 8) % 8;
+  return { nf, nr, df, dr, ok: true };
 }
 
 function isMissing(mods, idx) {
@@ -90,6 +109,8 @@ function isSquareAttacked(state, square, byColor, mods) {
   // attack detection mostly "chess-like" to avoid impossible-to-reason check states.
   const board = state.board;
   const wrapEdges = mods.wrapEdges;
+  const bumperBoard = mods.bumperBoard && !wrapEdges;
+  const maxRaySteps = wrapEdges || bumperBoard ? 63 : 7;
   const targetFile = idxToFile(square);
   const targetRank = idxToRank(square);
 
@@ -97,12 +118,20 @@ function isSquareAttacked(state, square, byColor, mods) {
     for (const [df, dr] of dfs.map((d, i) => [d, drs[i]])) {
       let file = targetFile;
       let rank = targetRank;
-      for (let step = 0; step < 7; step++) {
-        const { nf, nr, ok } = stepWithWrap(file, rank, df, dr, wrapEdges);
+      let dirF = df;
+      let dirR = dr;
+      const visited = new Set([square]);
+      for (let step = 0; step < maxRaySteps; step++) {
+        const s = stepWithDirection(file, rank, dirF, dirR, wrapEdges, bumperBoard);
+        const { nf, nr, ok } = s;
         if (!ok) break;
+        dirF = s.df;
+        dirR = s.dr;
         file = nf;
         rank = nr;
         const idx = toIdx(file, rank);
+        if (visited.has(idx)) break;
+        visited.add(idx);
         if (isMissing(mods, idx)) break;
         const p = board[idx];
         if (!p) continue;
@@ -126,7 +155,7 @@ function isSquareAttacked(state, square, byColor, mods) {
     [-1, 2],
   ];
   for (const [df, dr] of knightD) {
-    const { nf, nr, ok } = stepWithWrap(targetFile, targetRank, df, dr, wrapEdges);
+    const { nf, nr, ok } = stepWithWrap(targetFile, targetRank, df, dr, wrapEdges, bumperBoard);
     if (!ok) continue;
     const idx = toIdx(nf, nr);
     if (isMissing(mods, idx)) continue;
@@ -137,7 +166,7 @@ function isSquareAttacked(state, square, byColor, mods) {
   // Pawns (attack direction depends on attacker).
   const pawnDr = byColor === "w" ? -1 : 1;
   for (const df of [-1, 1]) {
-    const { nf, nr, ok } = stepWithWrap(targetFile, targetRank, df, pawnDr, wrapEdges);
+    const { nf, nr, ok } = stepWithWrap(targetFile, targetRank, df, pawnDr, wrapEdges, bumperBoard);
     if (!ok) continue;
     const idx = toIdx(nf, nr);
     if (isMissing(mods, idx)) continue;
@@ -149,7 +178,7 @@ function isSquareAttacked(state, square, byColor, mods) {
   for (const dr of [-1, 0, 1]) {
     for (const df of [-1, 0, 1]) {
       if (!df && !dr) continue;
-      const { nf, nr, ok } = stepWithWrap(targetFile, targetRank, df, dr, wrapEdges);
+      const { nf, nr, ok } = stepWithWrap(targetFile, targetRank, df, dr, wrapEdges, bumperBoard);
       if (!ok) continue;
       const idx = toIdx(nf, nr);
       if (isMissing(mods, idx)) continue;
@@ -307,10 +336,16 @@ function generatePseudoMoves(state, color, mods) {
   const board = state.board;
   const wrapEdges = mods.wrapEdges;
   const bumperBoard = mods.bumperBoard && !wrapEdges;
+  const maxRaySteps = wrapEdges || bumperBoard ? 63 : 7;
   const moves = [];
+  const moveKeys = new Set();
 
   function addMove(from, to, extra = {}) {
     if (isMissing(mods, to)) return;
+    const promotion = extra.promotion || "";
+    const key = `${from}:${to}:${promotion}`;
+    if (moveKeys.has(key)) return;
+    moveKeys.add(key);
     moves.push({ from, to, promotion: extra.promotion });
   }
 
@@ -404,15 +439,11 @@ function generatePseudoMoves(state, color, mods) {
           let dirF = df;
           let dirR = dr;
           const visited = new Set([from]);
-          for (let step = 0; step < 7; step++) {
-            let s = stepWithWrap(f, r, dirF, dirR, wrapEdges, bumperBoard);
+          for (let step = 0; step < maxRaySteps; step++) {
+            const s = stepWithDirection(f, r, dirF, dirR, wrapEdges, bumperBoard);
             if (!s.ok) break;
-            if (bumperBoard && !onBoard(f + dirF, r + dirR)) {
-              dirF *= -1;
-              dirR *= -1;
-              s = stepWithWrap(f, r, dirF, dirR, wrapEdges, false);
-              if (!s.ok) break;
-            }
+            dirF = s.df;
+            dirR = s.dr;
             f = s.nf;
             r = s.nr;
             const to = toIdx(f, r);
@@ -491,15 +522,11 @@ function generatePseudoMoves(state, color, mods) {
       let dirF = df;
       let dirR = dr;
       const visited = new Set([from]);
-      for (let step = 0; step < 7; step++) {
-        let s = stepWithWrap(f, r, dirF, dirR, wrapEdges, bumperBoard);
+      for (let step = 0; step < maxRaySteps; step++) {
+        const s = stepWithDirection(f, r, dirF, dirR, wrapEdges, bumperBoard);
         if (!s.ok) break;
-        if (bumperBoard && !onBoard(f + dirF, r + dirR)) {
-          dirF *= -1;
-          dirR *= -1;
-          s = stepWithWrap(f, r, dirF, dirR, wrapEdges, false);
-          if (!s.ok) break;
-        }
+        dirF = s.df;
+        dirR = s.dr;
         f = s.nf;
         r = s.nr;
         const to = toIdx(f, r);

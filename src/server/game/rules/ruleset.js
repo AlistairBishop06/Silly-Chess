@@ -1335,16 +1335,6 @@ const RULES = [
     },
   },
   {
-    id: "dur_mirrored_moves_8",
-    kind: "duration",
-    durationTurns: 8,
-    name: "Mirrored Moves",
-    description: "For 8 turns, opponent copies your last move if possible.",
-    modifiers() {
-      return { mirroredMoves: true };
-    },
-  },
-  {
     id: "dur_king_knight_4",
     kind: "duration",
     durationTurns: 4,
