@@ -84,6 +84,8 @@ const HILL_SQUARES = new Set([
 const HILL_PROMOTION = { p: "n", n: "b", b: "r", r: "q", q: "q" };
 const SUPERMARKET_COSTS = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const SUPERMARKET_BUDGET = 10;
+const FRUIT_MACHINE_TYPES = ["p", "n", "b", "r", "q", "k"];
+const FRUIT_MACHINE_SPINS = 5;
 
 class Game {
   constructor({ roomCode, debugMode = false }) {
@@ -135,6 +137,8 @@ class Game {
     this.stickySquares = new Set();
     this.supermarkets = [];
     this.supermarket = null;
+    this.fruitMachines = [];
+    this.fruitMachine = null;
 
     this.lastMoveSquares = [];
     this.moveList = [];
@@ -212,6 +216,7 @@ class Game {
     this.rps = null;
     this.wager = null;
     this.supermarket = null;
+    this.fruitMachine = null;
     this.bonusRuleChoice = null;
     this.bonusRuleChoices = [];
     this.ruleChoicesByPlayerId = {};
@@ -232,6 +237,7 @@ class Game {
     this.ghostSquares = new Set();
     this.stickySquares = new Set();
     this.supermarkets = [];
+    this.fruitMachines = [];
     this.missingSquares = new Set();
     this.landExpansionCount = 0;
 
@@ -246,6 +252,7 @@ class Game {
       this.ghostSquares = new Set();
       this.stickySquares = new Set();
       this.supermarkets = [];
+      this.fruitMachines = [];
     } else {
       for (let i = 0; i < persistentLandExpansions; i++) this.expandBoard(4, { silent: true });
     }
@@ -649,6 +656,12 @@ class Game {
     this.effects.push({ type: "log", id: this.nextEffectId(), text: `Supermarket opened at ${this.squareName(square)}.` });
   }
 
+  addFruitMachine({ square, instanceId }) {
+    if (square == null || square < 0 || square >= this.state.board.length) return;
+    this.fruitMachines.push({ square, instanceId: instanceId || null, ruleId: "del_fruit_machine_5" });
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Fruit Machine opened at ${this.squareName(square)}.` });
+  }
+
   maybeStartSupermarketVisit(playerId, square) {
     if (this.result || this.phase !== "play") return false;
     if (square == null || !this.state.board[square] || this.state.board[square]?.color === "x") return false;
@@ -668,10 +681,38 @@ class Game {
     return true;
   }
 
+  maybeStartFruitMachineVisit(playerId, square) {
+    if (this.result || this.phase !== "play") return false;
+    if (square == null || !this.state.board[square] || this.state.board[square]?.color === "x") return false;
+    const index = this.fruitMachines.findIndex((machine) => machine.square === square);
+    if (index < 0) return false;
+    const color = this.playerColor(playerId);
+    if (!color || this.state.board[square].color !== color) return false;
+    const [machine] = this.fruitMachines.splice(index, 1);
+    this.fruitMachine = {
+      active: true,
+      playerId,
+      color,
+      square,
+      instanceId: machine.instanceId || null,
+      spinsRemaining: FRUIT_MACHINE_SPINS,
+      spinsUsed: 0,
+      results: [],
+      prizes: {},
+    };
+    this.phase = "fruitMachine";
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `${this.playerName(playerId)} found the fruit machine at ${this.squareName(square)}.` });
+    return true;
+  }
+
   randomEmptyBoardSquare() {
     const empty = [];
-    for (let i = 0; i < 64; i++) {
-      if (!this.state.board[i] && !this.missingSquares.has(i) && !this.hazards.deadly.has(i) && !this.hazards.lava.has(i) && !this.hazards.asteroid.has(i)) {
+    const blocked = new Set([
+      ...(this.supermarkets || []).map((market) => market.square),
+      ...(this.fruitMachines || []).map((machine) => machine.square),
+    ]);
+    for (let i = 0; i < this.state.board.length; i++) {
+      if (!this.state.board[i] && !blocked.has(i) && !this.missingSquares.has(i) && !this.hazards.deadly.has(i) && !this.hazards.lava.has(i) && !this.hazards.asteroid.has(i)) {
         empty.push(i);
       }
     }
@@ -711,6 +752,74 @@ class Game {
     }
 
     this.supermarket = null;
+    this.phase = "play";
+    this.evaluateGameEnd();
+    if (this.phase === "play") this.maybeStartRuleChoice();
+    return { ok: true };
+  }
+
+  submitFruitMachineSpin(playerId) {
+    if (this.phase !== "fruitMachine" || !this.fruitMachine) return { ok: false, error: "No fruit machine is open" };
+    if (this.fruitMachine.playerId !== playerId) return { ok: false, error: "Waiting for the other player to spin" };
+    if (this.fruitMachine.complete) return { ok: false, error: "Fruit machine is ready to pay out" };
+    if (this.fruitMachine.spinsRemaining <= 0) return { ok: false, error: "No spins left" };
+
+    const wheels = [0, 1, 2].map(() => FRUIT_MACHINE_TYPES[Math.floor(Math.random() * FRUIT_MACHINE_TYPES.length)]);
+    const counts = wheels.reduce((acc, type) => {
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {});
+    let winType = null;
+    let prizeCount = 0;
+    for (const [type, count] of Object.entries(counts)) {
+      if (count === 3) {
+        winType = type;
+        prizeCount = 2;
+        break;
+      }
+      if (count === 2) {
+        winType = type;
+        prizeCount = 1;
+      }
+    }
+
+    if (winType && prizeCount > 0) {
+      this.fruitMachine.prizes[winType] = (this.fruitMachine.prizes[winType] || 0) + prizeCount;
+    }
+    this.fruitMachine.spinsRemaining -= 1;
+    this.fruitMachine.spinsUsed += 1;
+    this.fruitMachine.results.push({ wheels, winType, prizeCount });
+
+    if (this.fruitMachine.spinsRemaining <= 0) this.fruitMachine.complete = true;
+    return { ok: true };
+  }
+
+  collectFruitMachinePrizes(playerId) {
+    if (this.phase !== "fruitMachine" || !this.fruitMachine) return { ok: false, error: "No fruit machine is open" };
+    if (this.fruitMachine.playerId !== playerId) return { ok: false, error: "Waiting for the other player to collect" };
+    if (!this.fruitMachine.complete) return { ok: false, error: "The fruit machine still has spins left" };
+    const prizes = { ...this.fruitMachine.prizes };
+    const color = this.fruitMachine.color;
+    const dropped = [];
+    for (const type of ["q", "r", "b", "n", "p", "k"]) {
+      const maxCount = type === "k" ? Math.min(1, prizes[type] || 0) : prizes[type] || 0;
+      for (let i = 0; i < maxCount; i++) {
+        const sq = this.randomEmptyBoardSquare();
+        if (sq == null) break;
+        this.state.board[sq] = { type, color, moved: true, tags: ["supplyCrate"] };
+        dropped.push({ sq, type, color });
+        this.applyHazardsAfterMove(sq);
+      }
+    }
+
+    if (dropped.length) {
+      this.effects.push({ type: "supplyDrop", id: this.nextEffectId(), drops: dropped });
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: `Fruit Machine paid out ${dropped.length} piece(s).` });
+    } else {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Fruit Machine finished with no pieces to deliver." });
+    }
+
+    this.fruitMachine = null;
     this.phase = "play";
     this.evaluateGameEnd();
     if (this.phase === "play") this.maybeStartRuleChoice();
@@ -1784,6 +1893,8 @@ class Game {
     for (const key of Object.keys(this.marks || {})) this.marks[key] = remapSet(this.marks[key], mapSquare);
     this.supermarkets = this.supermarkets.map((market) => ({ ...market, square: mapSquare(market.square) }));
     if (this.supermarket) this.supermarket = { ...this.supermarket, square: mapSquare(this.supermarket.square) };
+    this.fruitMachines = this.fruitMachines.map((machine) => ({ ...machine, square: mapSquare(machine.square) }));
+    if (this.fruitMachine) this.fruitMachine = { ...this.fruitMachine, square: mapSquare(this.fruitMachine.square) };
     this.landExpansionCount = (this.landExpansionCount || 0) + 1;
     if (!options.silent) this.effects.push({ type: "rule", id: this.nextEffectId(), text: `Land Expansion added a 4x4 territory to the board edge.` });
     return newSize;
@@ -1984,7 +2095,7 @@ class Game {
 
       this.ruleManager.tickAfterPly();
       this.evaluateGameEnd();
-      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo)) this.maybeStartRuleChoice();
+      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo) && !this.maybeStartFruitMachineVisit(playerId, finalTo)) this.maybeStartRuleChoice();
       return { ok: true };
     }
 
@@ -2177,7 +2288,7 @@ class Game {
       this.pendingPawnSoldierShot = { playerId, color, from: finalTo };
       this.phase = "pawnSoldierShot";
     } else {
-      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo)) this.maybeStartRuleChoice();
+      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo) && !this.maybeStartFruitMachineVisit(playerId, finalTo)) this.maybeStartRuleChoice();
     }
     return { ok: true };
   }
@@ -2300,6 +2411,20 @@ class Game {
             square: this.supermarket.square,
             budget: this.supermarket.budget,
             costs: { ...this.supermarket.costs },
+          }
+        : null,
+      fruitMachines: this.fruitMachines.map((machine) => ({ square: machine.square, instanceId: machine.instanceId })),
+      fruitMachine: this.fruitMachine
+        ? {
+            active: true,
+            playerId: this.fruitMachine.playerId,
+            color: this.fruitMachine.color,
+            square: this.fruitMachine.square,
+            spinsRemaining: this.fruitMachine.spinsRemaining,
+            spinsUsed: this.fruitMachine.spinsUsed,
+            complete: !!this.fruitMachine.complete,
+            results: [...(this.fruitMachine.results || [])],
+            prizes: { ...(this.fruitMachine.prizes || {}) },
           }
         : null,
       rps: this.rps

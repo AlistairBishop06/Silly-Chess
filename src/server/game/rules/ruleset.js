@@ -1151,6 +1151,26 @@ const RULES = [
 
   // 🟢 For X Turns (original 18 + 4 new)
   {
+    id: "del_fruit_machine_5",
+    kind: "delayed",
+    delayTurns: 5,
+    name: "Fruit Machine",
+    description: "In 5 turns, a fruit machine appears on a random empty square. The first player to land on it gets 5 lucky spins.",
+    apply(game, ctx) {
+      const blocked = new Set([
+        ...(game.supermarkets || []).map((market) => market.square),
+        ...(game.fruitMachines || []).map((machine) => machine.square),
+      ]);
+      const empties = [...Array(game.state.board.length).keys()].filter(
+        (i) => !game.state.board[i] && !blocked.has(i) && !game.missingSquares.has(i)
+      );
+      const sq = empties.length ? empties[randInt(empties.length)] : null;
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addFruitMachine?.({ square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
     id: "dur_ads_7",
     kind: "duration",
     durationTurns: 7,

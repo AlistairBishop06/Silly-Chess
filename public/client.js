@@ -96,6 +96,13 @@ const els = {
   supermarketStatus: document.getElementById("supermarketStatus"),
   supermarketItems: document.getElementById("supermarketItems"),
   supermarketCheckoutBtn: document.getElementById("supermarketCheckoutBtn"),
+  fruitMachineModal: document.getElementById("fruitMachineModal"),
+  fruitMachineSpins: document.getElementById("fruitMachineSpins"),
+  fruitMachineStatus: document.getElementById("fruitMachineStatus"),
+  fruitMachineCabinet: document.getElementById("fruitMachineCabinet"),
+  fruitMachineReels: document.getElementById("fruitMachineReels"),
+  fruitMachineLever: document.getElementById("fruitMachineLever"),
+  fruitMachinePrize: document.getElementById("fruitMachinePrize"),
   mutantModal: document.getElementById("mutantModal"),
   mutantStatus: document.getElementById("mutantStatus"),
   mutantSelected: document.getElementById("mutantSelected"),
@@ -132,6 +139,13 @@ const state = {
   openServers: [],
   supermarketItems: { p: 0, n: 0, b: 0, r: 0, q: 0 },
   supermarketKey: null,
+  fruitMachineKey: null,
+  fruitMachineSpinning: false,
+  fruitMachineAnimateUntil: 0,
+  fruitMachineSettle: null,
+  fruitMachineCollecting: false,
+  fruitMachineLeverStartY: null,
+  fruitMachineLeverPull: 0,
   ads: [],
   nextAdAt: 0,
   authToken: null,
@@ -996,7 +1010,7 @@ function renderDailyShop() {
     })
     .join("");
   if (els.shopStatus) {
-    els.shopStatus.innerHTML = `<span class="shopBalancePill">Balance: ${coinsText(user)} coins</span><span class="shopSubtle">Rarest daily item featured</span>`;
+    els.shopStatus.innerHTML = `<span class="shopBalancePill">Balance: ${coinsText(user)} coins</span><span class="shopSubtle">Shop Resets Daily</span>`;
   }
 }
 
@@ -2043,6 +2057,7 @@ function drawBoardEffects(s, t) {
   for (const sq of s.stickySquares || []) drawStickyTile(sq, t);
   for (const sq of s.hazards?.asteroid || []) drawAsteroidTile(sq, t);
   for (const market of s.supermarkets || []) drawSupermarketTile(market.square, t);
+  for (const machine of s.fruitMachines || []) drawFruitMachineTile(machine.square, t);
   for (const fan of s.fans || []) drawFanVisual(fan, t);
 }
 
@@ -2126,6 +2141,47 @@ function drawSupermarketTile(sq, t) {
   });
 }
 
+function drawFruitMachineTile(sq, t) {
+  drawTileGlyph(sq, (x, y, size) => {
+    const pulse = 0.5 + 0.5 * Math.sin(t / 220 + sq);
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 79, 139, ${0.12 + pulse * 0.07})`;
+    ctx.beginPath();
+    ctx.arc(x, y, size * (0.45 + pulse * 0.04), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#b51d43";
+    ctx.strokeStyle = "rgba(255, 247, 232, 0.82)";
+    ctx.lineWidth = Math.max(2, size * 0.026);
+    ctx.beginPath();
+    ctx.roundRect(x - size * 0.31, y - size * 0.34, size * 0.62, size * 0.68, size * 0.06);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#fff7e8";
+    ctx.fillRect(x - size * 0.22, y - size * 0.12, size * 0.44, size * 0.2);
+    ctx.fillStyle = "#111827";
+    ctx.font = `${Math.floor(size * 0.15)}px "Segoe UI Symbol", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("\u265F \u265E \u265B", x, y - size * 0.02);
+
+    ctx.fillStyle = "#ffd166";
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI * 2 * i) / 6 + t / 700;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(angle) * size * 0.35, y + Math.sin(angle) * size * 0.38, size * 0.035, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#24d6c8";
+    ctx.fillRect(x + size * 0.31, y - size * 0.16, size * 0.07, size * 0.26);
+    ctx.beginPath();
+    ctx.arc(x + size * 0.345, y - size * 0.22, size * 0.055, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
 function renderSupermarket() {
   const s = state.serverState;
   const shop = s?.supermarket;
@@ -2196,6 +2252,132 @@ function renderSupermarket() {
     els.supermarketCheckoutBtn.disabled = !yourShop;
     els.supermarketCheckoutBtn.textContent = yourShop ? "Checkout" : "Waiting...";
   }
+}
+
+function fruitMachineResultLabel(result) {
+  if (!result) return "Pull the lever to test your luck.";
+  const glyph = result.winType ? PIECE_GLYPH_MONO[result.winType] || result.winType.toUpperCase() : "";
+  if (result.prizeCount === 2) return `Jackpot: 3 of a kind. You won 2 ${glyph} pieces.`;
+  if (result.prizeCount === 1) return `Nice: 2 of a kind. You won 1 ${glyph} piece.`;
+  return "No match this spin.";
+}
+
+function fruitMachineCycleType(index, t = nowMs()) {
+  const types = ["p", "n", "b", "r", "q", "k"];
+  return types[Math.floor(t / 78 + index * 2) % types.length];
+}
+
+function fruitMachineVisibleType(index, finalType, t = nowMs()) {
+  const settle = state.fruitMachineSettle;
+  if (!settle || settle.key !== state.fruitMachineKey) {
+    return state.fruitMachineSpinning ? fruitMachineCycleType(index, t) : finalType;
+  }
+  return t >= settle.ends[index] ? finalType : fruitMachineCycleType(index, t);
+}
+
+function isFruitMachineAnimating(t = nowMs()) {
+  const settle = state.fruitMachineSettle;
+  return state.fruitMachineSpinning || !!(settle && settle.key === state.fruitMachineKey && t < settle.doneAt);
+}
+
+function scheduleFruitMachineRerender() {
+  if (!isFruitMachineAnimating()) return;
+  setTimeout(() => {
+    renderFruitMachine();
+  }, 70);
+}
+
+function collectFruitMachinePrizes() {
+  if (!state.lobby || !state.playerId || state.fruitMachineCollecting) return;
+  const machine = state.serverState?.fruitMachine;
+  if (!machine?.complete || machine.playerId !== state.playerId) return;
+  if (isFruitMachineAnimating()) return;
+  state.fruitMachineCollecting = true;
+  socket.emit("game:fruitMachineCollect", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) {
+      state.fruitMachineCollecting = false;
+      logLine(`<strong>Fruit Machine</strong>: ${escapeHtml(res?.error || "payout failed")}`);
+    }
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+}
+
+function renderFruitMachine() {
+  const s = state.serverState;
+  const machine = s?.fruitMachine;
+  const active = !!machine?.active && s?.phase === "fruitMachine";
+  if (!els.fruitMachineModal) return;
+  els.fruitMachineModal.hidden = !active;
+  if (!active) {
+    state.fruitMachineKey = null;
+    state.fruitMachineSpinning = false;
+    state.fruitMachineAnimateUntil = 0;
+    state.fruitMachineSettle = null;
+    state.fruitMachineCollecting = false;
+    return;
+  }
+
+  const yourMachine = machine.playerId === state.playerId;
+  const last = (machine.results || [])[machine.results.length - 1] || null;
+  const key = `${machine.playerId}|${machine.spinsUsed}|${(last?.wheels || []).join("")}`;
+  if (state.fruitMachineKey !== key) {
+    const now = nowMs();
+    if (state.fruitMachineKey != null && last) {
+      state.fruitMachineAnimateUntil = now + 2100;
+      state.fruitMachineSettle = {
+        key,
+        ends: [now + 900, now + 1350, now + 1800],
+        doneAt: now + 2050,
+      };
+    }
+    state.fruitMachineKey = key;
+    state.fruitMachineSpinning = false;
+    if (last?.prizeCount) {
+      setTimeout(() => {
+        if (state.fruitMachineKey === key) {
+          els.fruitMachineCabinet?.classList.add("is-winning");
+          setTimeout(() => els.fruitMachineCabinet?.classList.remove("is-winning"), 1300);
+        }
+      }, 1850);
+    }
+  }
+
+  if (els.fruitMachineSpins) els.fruitMachineSpins.textContent = `${machine.spinsRemaining || 0} spins`;
+  if (els.fruitMachineStatus) {
+    els.fruitMachineStatus.textContent = yourMachine
+      ? isFruitMachineAnimating()
+        ? "Reels spinning..."
+        : fruitMachineResultLabel(last)
+      : `${machine.color === "w" ? "White" : "Black"} is spinning.`;
+  }
+  if (els.fruitMachineReels) {
+    const wheels = last?.wheels?.length ? last.wheels : ["p", "n", "q"];
+    const t = nowMs();
+    els.fruitMachineReels.innerHTML = "";
+    wheels.forEach((type, index) => {
+      const visibleType = fruitMachineVisibleType(index, type, t);
+      const settled = !state.fruitMachineSettle || state.fruitMachineSettle.key !== state.fruitMachineKey || t >= state.fruitMachineSettle.ends[index];
+      const reel = document.createElement("div");
+      reel.className = `fruitReel ${settled && !state.fruitMachineSpinning ? "settled" : "spinning"}`;
+      reel.style.setProperty("--delay", `${index * 120}ms`);
+      reel.innerHTML = `<span>${escapeHtml(PIECE_GLYPH_MONO[visibleType] || visibleType.toUpperCase())}</span>`;
+      els.fruitMachineReels.appendChild(reel);
+    });
+  }
+  if (els.fruitMachinePrize) {
+    const prizes = machine.prizes || {};
+    const entries = Object.entries(prizes).filter(([, count]) => count > 0);
+    els.fruitMachinePrize.innerHTML = entries.length
+      ? entries.map(([type, count]) => `<span>${escapeHtml(PIECE_GLYPH_MONO[type] || type.toUpperCase())} x${Number(count)}</span>`).join("")
+      : "<span>No prizes banked yet</span>";
+  }
+  if (els.fruitMachineLever) {
+    els.fruitMachineLever.disabled = !yourMachine || isFruitMachineAnimating() || machine.complete || (machine.spinsRemaining || 0) <= 0;
+    els.fruitMachineLever.classList.toggle("pulled", state.fruitMachineLeverPull > 0);
+    els.fruitMachineLever.style.setProperty("--pull", `${state.fruitMachineLeverPull || 0}px`);
+  }
+  scheduleFruitMachineRerender();
+  if (machine.complete && yourMachine && !isFruitMachineAnimating()) collectFruitMachinePrizes();
 }
 
 const AD_VARIANTS = [
@@ -2436,6 +2618,10 @@ function draw() {
         ? s.supermarket?.playerId === state.playerId
           ? "Supermarket"
           : "Opponent shopping"
+      : s.phase === "fruitMachine"
+        ? s.fruitMachine?.playerId === state.playerId
+          ? "Pull the lever"
+          : "Opponent spinning"
       : s.phase === "rps"
         ? "RPS Duel!"
       : s.phase === "wager"
@@ -3134,6 +3320,7 @@ function ruleArtIcon(ruleId, ruleName) {
   if (hay.includes("ads")) return "\u25A3";
   if (hay.includes("lawnmower")) return "\u25AC";
   if (hay.includes("backup")) return "\u2665";
+  if (hay.includes("fruit machine")) return "\u265B";
   if (hay.includes("supermarket") || hay.includes("shop")) return "\u{1F6D2}";
   if (hay.includes("sticky")) return "\u25CD";
   if (hay.includes("haunted")) return "\u25D6";
@@ -3738,6 +3925,7 @@ function syncUI() {
     els.choiceCards.classList.remove("debugChoice");
     if (els.resultModal) els.resultModal.hidden = true;
     if (els.supermarketModal) els.supermarketModal.hidden = true;
+    if (els.fruitMachineModal) els.fruitMachineModal.hidden = true;
     stopConfetti();
     if (els.sideLabelTop) els.sideLabelTop.textContent = "";
     if (els.sideLabelBottom) els.sideLabelBottom.textContent = "";
@@ -3761,6 +3949,9 @@ function syncUI() {
   }
   if (s.supermarket?.active) {
     els.gameMsg.textContent = s.supermarket.playerId === state.playerId ? "Choose your supermarket delivery" : "Opponent is shopping";
+  }
+  if (s.fruitMachine?.active) {
+    els.gameMsg.textContent = s.fruitMachine.playerId === state.playerId ? "Pull the fruit machine lever" : "Opponent is spinning the fruit machine";
   }
   if (s.phase === "pawnSoldierShot") {
     els.gameMsg.textContent =
@@ -3793,6 +3984,7 @@ function syncUI() {
   renderRps();
   renderWager();
   renderSupermarket();
+  renderFruitMachine();
   renderMutant();
 
   // Result modal.
@@ -4110,6 +4302,53 @@ els.supermarketCheckoutBtn?.addEventListener("click", () => {
     if (!res?.ok) logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "checkout failed")}`);
     socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
   });
+});
+
+function spinFruitMachine() {
+  if (!state.lobby || !state.playerId || state.fruitMachineSpinning) return;
+  const machine = state.serverState?.fruitMachine;
+  if (isFruitMachineAnimating()) return;
+  if (!machine?.active || machine.playerId !== state.playerId || (machine.spinsRemaining || 0) <= 0) return;
+  state.fruitMachineSpinning = true;
+  state.fruitMachineSettle = null;
+  state.fruitMachineLeverPull = 42;
+  renderFruitMachine();
+  socket.emit("game:fruitMachineSpin", { code: state.lobby, playerId: state.playerId }, (res) => {
+    if (!res?.ok) {
+      state.fruitMachineSpinning = false;
+      logLine(`<strong>Fruit Machine</strong>: ${escapeHtml(res?.error || "spin failed")}`);
+    }
+    state.fruitMachineLeverPull = 0;
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+}
+
+els.fruitMachineLever?.addEventListener("pointerdown", (ev) => {
+  if (els.fruitMachineLever.disabled) return;
+  state.fruitMachineLeverStartY = ev.clientY;
+  state.fruitMachineLeverPull = 0;
+  els.fruitMachineLever.setPointerCapture?.(ev.pointerId);
+  renderFruitMachine();
+});
+
+els.fruitMachineLever?.addEventListener("pointermove", (ev) => {
+  if (state.fruitMachineLeverStartY == null) return;
+  state.fruitMachineLeverPull = Math.max(0, Math.min(58, ev.clientY - state.fruitMachineLeverStartY));
+  renderFruitMachine();
+});
+
+els.fruitMachineLever?.addEventListener("pointerup", () => {
+  const pulled = state.fruitMachineLeverPull >= 28;
+  state.fruitMachineLeverStartY = null;
+  if (pulled) spinFruitMachine();
+  else {
+    state.fruitMachineLeverPull = 0;
+    renderFruitMachine();
+  }
+});
+
+els.fruitMachineLever?.addEventListener("click", () => {
+  if (state.fruitMachineLeverStartY == null) spinFruitMachine();
 });
 
 els.mutantConfirmBtn?.addEventListener("click", () => {

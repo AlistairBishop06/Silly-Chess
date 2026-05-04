@@ -1542,6 +1542,12 @@ function runBotAction(roomCode) {
     if (game.supermarket?.playerId === bot.id) {
       changed = !!game.submitSupermarketPurchase(bot.id, botSupermarketItems(game.supermarket.budget))?.ok;
     }
+  } else if (game.phase === "fruitMachine") {
+    if (game.fruitMachine?.playerId === bot.id) {
+      changed = game.fruitMachine.complete
+        ? !!game.collectFruitMachinePrizes(bot.id)?.ok
+        : !!game.submitFruitMachineSpin(bot.id)?.ok;
+    }
   } else if (game.phase === "rps" && game.rps) {
     const color = game.playerColor(bot.id);
     if (color && !game.rps.byColor?.[color]) {
@@ -1561,7 +1567,7 @@ function runBotAction(roomCode) {
   }
 
   if (changed) pushEffectsAndState(roomCode);
-  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "mutantFusion", "pawnSoldierShot", "supermarket"].includes(game.phase)) scheduleBotTurn(roomCode);
+  else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "mutantFusion", "pawnSoldierShot", "supermarket", "fruitMachine"].includes(game.phase)) scheduleBotTurn(roomCode);
 }
 
 function scheduleBotTurn(roomCode) {
@@ -1972,6 +1978,32 @@ io.on("connection", (socket) => {
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
     touchPlayerSocket({ code, entry, playerId: pid, socket });
     const res = game.submitSupermarketPurchase(pid, items);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:fruitMachineSpin", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.submitFruitMachineSpin(pid);
+    if (!res.ok) return cb?.(res);
+    cb?.({ ok: true });
+    pushEffectsAndState(code);
+  });
+
+  socket.on("game:fruitMachineCollect", ({ code, playerId } = {}, cb) => {
+    const entry = rooms.get(code);
+    if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
+    const game = entry.room.game;
+    const pid = getOrRebindPlayerId({ code, room: entry.room, socket, playerId });
+    if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
+    touchPlayerSocket({ code, entry, playerId: pid, socket });
+    const res = game.collectFruitMachinePrizes(pid);
     if (!res.ok) return cb?.(res);
     cb?.({ ok: true });
     pushEffectsAndState(code);

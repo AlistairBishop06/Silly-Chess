@@ -1651,6 +1651,181 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   width: min(620px, 92vw);
 }
 
+.fruitMachineCard {
+  width: min(560px, 94vw);
+  overflow: visible;
+}
+
+.fruitMachineCabinet {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  border: 3px solid #ffd166;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.16), transparent 18% 82%, rgba(0, 0, 0, 0.2)),
+    linear-gradient(180deg, #e62555, #8e1732);
+  padding: 16px 58px 16px 16px;
+  box-shadow: inset 0 0 0 5px rgba(255, 247, 232, 0.12), 0 24px 60px rgba(0, 0, 0, 0.42);
+}
+
+.fruitMarquee {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border: 2px solid rgba(17, 24, 39, 0.45);
+  border-radius: 6px;
+  color: #111827;
+  background: linear-gradient(180deg, #fff7e8, #ffd166);
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.fruitMachineReels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  border: 3px solid rgba(17, 24, 39, 0.72);
+  border-radius: 8px;
+  background: #111827;
+  padding: 10px;
+}
+
+.fruitReel {
+  height: 112px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  color: #111827;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.18)),
+    #fff7e8;
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols2", serif;
+  font-size: 54px;
+  box-shadow: inset 0 8px 18px rgba(0, 0, 0, 0.18), inset 0 -8px 18px rgba(0, 0, 0, 0.14);
+}
+
+.fruitReel.spinning span {
+  animation: fruitReelBlur 160ms linear infinite;
+}
+
+.fruitReel.settled {
+  box-shadow: inset 0 8px 18px rgba(0, 0, 0, 0.18), inset 0 -8px 18px rgba(0, 0, 0, 0.14), 0 0 0 2px rgba(255, 209, 102, 0.34);
+}
+
+.fruitReel.settled span {
+  animation: fruitReelLand 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.fruitMachineLever {
+  position: absolute;
+  right: 12px;
+  top: 76px;
+  width: 34px;
+  height: 132px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #273248, #111827);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+
+.fruitMachineLever span {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 32% 28%, #fff7e8, #ff4f8b 62%, #7a102b);
+  transform: translate(-50%, var(--pull, 0px));
+  transition: transform 120ms ease;
+}
+
+.fruitMachineLever::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 34px;
+  width: 5px;
+  height: 82px;
+  border-radius: 999px;
+  background: #c8d2ea;
+  transform: translateX(-50%);
+}
+
+.fruitMachinePrize {
+  min-height: 34px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.fruitMachinePrize span {
+  border: 1px solid rgba(255, 209, 102, 0.42);
+  border-radius: 999px;
+  color: #fff7e8;
+  background: rgba(17, 24, 39, 0.36);
+  padding: 6px 9px;
+  font-weight: 820;
+}
+
+.fruitMachineLights {
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 8% 10%, #ffd166 0 4px, transparent 5px),
+    radial-gradient(circle at 26% 10%, #24d6c8 0 4px, transparent 5px),
+    radial-gradient(circle at 44% 10%, #ffd166 0 4px, transparent 5px),
+    radial-gradient(circle at 62% 10%, #24d6c8 0 4px, transparent 5px),
+    radial-gradient(circle at 80% 10%, #ffd166 0 4px, transparent 5px),
+    radial-gradient(circle at 92% 10%, #24d6c8 0 4px, transparent 5px);
+}
+
+.fruitMachineCabinet.is-winning {
+  animation: fruitMachineWin 140ms linear 9;
+}
+
+@keyframes fruitReelBlur {
+  0% {
+    transform: translateY(-18px);
+    filter: blur(3px);
+  }
+  100% {
+    transform: translateY(18px);
+    filter: blur(3px);
+  }
+}
+
+@keyframes fruitReelLand {
+  0% {
+    transform: translateY(-26px) scale(0.92);
+    filter: blur(2px);
+  }
+  72% {
+    transform: translateY(8px) scale(1.04);
+    filter: blur(0);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes fruitMachineWin {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 5px rgba(255, 247, 232, 0.12), 0 24px 60px rgba(0, 0, 0, 0.42);
+  }
+  50% {
+    box-shadow: inset 0 0 0 5px rgba(255, 247, 232, 0.28), 0 0 38px rgba(255, 209, 102, 0.76), 0 24px 60px rgba(0, 0, 0, 0.42);
+  }
+}
+
 .mutantCard {
   width: min(520px, 92vw);
 }
