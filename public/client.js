@@ -175,12 +175,12 @@ const CARD_POPUP_EXIT_MS = 560;
 const CARD_POPUP_ENTER_MS = Math.max(240, CARD_POPUP_HOLD_MS - CARD_POPUP_EXIT_MS);
 
 const PIECE_GLYPH_MONO = {
-  p: "♙",
-  n: "♘",
-  b: "♗",
-  r: "♖",
-  q: "♕",
-  k: "♔",
+  p: "â™™",
+  n: "â™˜",
+  b: "â™—",
+  r: "â™–",
+  q: "â™•",
+  k: "â™”",
 };
 
 function sqToAlg(sq) {
@@ -607,7 +607,7 @@ function n(value) {
 }
 
 function coinsText(user) {
-  return user?.isAdmin ? "∞" : n(user?.stats?.coins);
+  return user?.isAdmin ? "âˆž" : n(user?.stats?.coins);
 }
 
 function msDuration(ms) {
@@ -881,6 +881,21 @@ function previewBoardStyle(name) {
   return `--preview-light:${p.light};--preview-dark:${p.dark};--preview-accent:${p.accent};`;
 }
 
+function pieceSkinPreviewStyle(name) {
+  const whiteStyle = pieceSkinStyle({ color: "w" }, false, name);
+  const blackStyle = pieceSkinStyle({ color: "b" }, false, name);
+  return [
+    `--piece-preview-fill-w:${whiteStyle.fill}`,
+    `--piece-preview-stroke-w:${whiteStyle.stroke}`,
+    `--piece-preview-accent-w:${whiteStyle.accent || whiteStyle.stroke || "#dbe2ff"}`,
+    `--piece-preview-glow-w:${whiteStyle.glow || "transparent"}`,
+    `--piece-preview-fill-b:${blackStyle.fill}`,
+    `--piece-preview-stroke-b:${blackStyle.stroke}`,
+    `--piece-preview-accent-b:${blackStyle.accent || blackStyle.stroke || "#3c4b83"}`,
+    `--piece-preview-glow-b:${blackStyle.glow || "transparent"}`,
+    `--piece-preview-accent:${whiteStyle.accent || blackStyle.accent || "#dbe2ff"}`,
+  ].join(";");
+}
 function cosmeticPreview(item) {
   const group = item.group;
   const slug = cosmeticSlug(item.name);
@@ -896,7 +911,14 @@ function cosmeticPreview(item) {
     return `<div class="shopPreview boardPreview" style="${escapeAttr(previewBoardStyle(item.name))}">${Array.from({ length: 16 }, (_, i) => `<span class="${(Math.floor(i / 4) + i) % 2 ? "dark" : "light"}"></span>`).join("")}</div>`;
   }
   if (group === "pieceSkins") {
-    return `<div class="shopPreview piecePreview piecePreview-${escapeAttr(slug)}">♛</div>`;
+    return `<div class="shopPreview piecePreview piecePreview-${escapeAttr(slug)}" style="${escapeAttr(pieceSkinPreviewStyle(item.name))}">
+      <div class="piecePreviewChip piecePreviewChipW">
+        <span class="piecePreviewGlyph piecePreviewGlyphW">${pieceGlyph("q", "w")}</span>
+      </div>
+      <div class="piecePreviewChip piecePreviewChipB">
+        <span class="piecePreviewGlyph piecePreviewGlyphB">${pieceGlyph("q", "b")}</span>
+      </div>
+    </div>`;
   }
   if (group === "emotes") {
     return `<div class="shopPreview emotePreview">${label}</div>`;
@@ -2906,8 +2928,8 @@ function pieceSkinFor(p) {
   return profileForColor(p?.color)?.pieceSkin || "Standard";
 }
 
-function pieceSkinStyle(p, colourBlind = false) {
-  const skin = cosmeticSlug(pieceSkinFor(p));
+function pieceSkinStyle(p, colourBlind = false, forceSkinName = null) {
+  const skin = cosmeticSlug(forceSkinName || pieceSkinFor(p));
   if (colourBlind) return { skin, fill: "rgba(210,215,226,0.92)", stroke: "rgba(10,12,18,0.42)", accent: "#7bd3ff" };
   const white = p?.color === "w";
   const styles = {
@@ -3596,7 +3618,7 @@ function renderWager() {
       const isSelected = selectedSet.has(item.sq);
       btn.className = `wagerPiece${isSelected ? " selected" : ""}`;
       const glyph = PIECE_GLYPH_MONO[item.p.type] || "?";
-      btn.innerHTML = `<div class="wagerGlyph">${glyph}</div><div class="wagerMeta">${escapeHtml(item.p.type.toUpperCase())} · ${escapeHtml(sqToAlg(item.sq))}</div>`;
+      btn.innerHTML = `<div class="wagerGlyph">${glyph}</div><div class="wagerMeta">${escapeHtml(item.p.type.toUpperCase())} Â· ${escapeHtml(sqToAlg(item.sq))}</div>`;
       if (!interactive) btn.style.opacity = "0.78";
       if (interactive) {
         btn.addEventListener("click", () => {
@@ -3731,7 +3753,7 @@ async function openRulebook() {
   els.rulebookModal.hidden = false;
 
   if (!state.cachedRulebook) {
-    els.rulebookCards.innerHTML = `<div class="modalStatus">Loading…</div>`;
+    els.rulebookCards.innerHTML = `<div class="modalStatus">Loadingâ€¦</div>`;
     try {
       const res = await fetch("/api/rules", { cache: "no-store" });
       const json = await res.json();
