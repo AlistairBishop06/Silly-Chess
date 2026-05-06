@@ -88,9 +88,15 @@ const FRUIT_MACHINE_TYPES = ["p", "n", "b", "r", "q", "k"];
 const FRUIT_MACHINE_SPINS = 5;
 
 class Game {
-  constructor({ roomCode, debugMode = false }) {
+  constructor({ roomCode, debugMode = false, mode = "multiplayer", campaignLevel = null, rulePoolIds = null }) {
     this.roomCode = roomCode;
     this.debugMode = !!debugMode;
+    this.mode = mode === "singleplayer" ? "singleplayer" : "multiplayer";
+    this.campaignLevel =
+      this.mode === "singleplayer" && Number.isFinite(Number(campaignLevel)) && Number(campaignLevel) > 0
+        ? Math.floor(Number(campaignLevel))
+        : null;
+    this.rulePoolIds = Array.isArray(rulePoolIds) ? [...new Set(rulePoolIds.filter((id) => typeof id === "string"))] : null;
     this.ruleChoiceEveryPlies = Math.max(1, Number(process.env.RULE_CHOICE_EVERY_PLIES || 7));
     this.ruleChoiceDurationMs = Math.max(5_000, Number(process.env.RULE_CHOICE_DURATION_MS || 30_000));
 
@@ -2346,6 +2352,8 @@ class Game {
 
     return {
       roomCode: this.roomCode,
+      mode: this.mode,
+      campaignLevel: this.campaignLevel,
       started: this.started,
       players: this.players.map((p) => ({ id: p.id, name: p.name, color: p.color, profile: p.profile || null })),
       board: serializeBoard(board),

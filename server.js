@@ -294,6 +294,19 @@ function usernameKey(username) {
 }
 
 const ADMIN_MIN_COIN_BALANCE = 1_000_000_000;
+const CAMPAIGN_CONFIG = {
+  totalLevels: 100,
+  levelsPerWorld: 10,
+  chestEvery: 3,
+  basicRuleIds: [
+    "inst_oops_explosion",
+    "inst_pawn_herding",
+    "inst_rps_duel",
+    "inst_swap_queens",
+    "inst_coinflip_wager",
+  ],
+  excludedFromCampaignPool: [],
+};
 
 function userById(userId) {
   if (!userId) return null;
@@ -384,6 +397,7 @@ function hydrateUser(user) {
   user.social.friends = Array.isArray(user.social.friends) ? user.social.friends : [];
   user.social.rivals = Array.isArray(user.social.rivals) ? user.social.rivals : [];
   user.social.clubs = Array.isArray(user.social.clubs) ? user.social.clubs : [];
+  user.campaign = normalizeCampaignProgress(user.campaign, buildCampaignRulePlan());
   return user;
 }
 
@@ -397,6 +411,114 @@ function tierForRating(rating) {
 
 function ruleName(ruleId) {
   return getRuleById(ruleId)?.name || ruleId;
+}
+
+function uniqueStrings(arr) {
+  return [...new Set((Array.isArray(arr) ? arr : []).filter((id) => typeof id === "string"))];
+}
+
+function uniqueNumbers(arr, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) {
+  return [
+    ...new Set(
+      (Array.isArray(arr) ? arr : [])
+        .map((value) => Number(value))
+        .filter((n) => Number.isFinite(n) && n >= min && n <= max)
+    ),
+  ];
+}
+
+function campaignChestMilestones() {
+  const out = [];
+  for (let level = CAMPAIGN_CONFIG.chestEvery; level < CAMPAIGN_CONFIG.totalLevels; level += CAMPAIGN_CONFIG.chestEvery) {
+    out.push(level);
+  }
+  return out;
+}
+
+function buildCampaignRulePlan(ruleCatalog = allRules()) {
+  const allRuleIds = uniqueStrings((ruleCatalog || []).map((rule) => rule.id));
+  const fallbackBasics = allRuleIds.slice(0, Math.min(6, allRuleIds.length));
+  const startingRuleIds = uniqueStrings(CAMPAIGN_CONFIG.basicRuleIds).filter((id) => allRuleIds.includes(id));
+  const basicRules = startingRuleIds.length ? startingRuleIds : fallbackBasics;
+  const excluded = new Set(uniqueStrings(CAMPAIGN_CONFIG.excludedFromCampaignPool));
+  const unlockableRuleIds = allRuleIds.filter((id) => !basicRules.includes(id) && !excluded.has(id));
+  const chestLevels = campaignChestMilestones();
+  return { allRuleIds, basicRules, unlockableRuleIds, chestLevels };
+}
+
+function createDefaultCampaignProgress(plan = buildCampaignRulePlan()) {
+  return {
+    highestUnlockedLevel: 1,
+    completedLevels: [],
+    openedChests: [],
+    unlockedRuleIds: uniqueStrings(plan.basicRules || []),
+  };
+}
+
+function normalizeCampaignProgress(raw, plan = buildCampaignRulePlan()) {
+  const parsed = raw && typeof raw === "object" ? raw : {};
+  const completed = uniqueNumbers(parsed.completedLevels, { min: 1, max: CAMPAIGN_CONFIG.totalLevels });
+  const openedChests = uniqueNumbers(parsed.openedChests, { min: 0, max: plan.chestLevels.length - 1 });
+  const unlockedRuleIds = uniqueStrings(parsed.unlockedRuleIds).filter((id) => plan.allRuleIds.includes(id));
+  const highestCompleted = completed.length ? Math.max(...completed) : 0;
+  const highestUnlockedLevel = Math.max(
+    1,
+    Math.min(
+      CAMPAIGN_CONFIG.totalLevels,
+      Math.max(Number(parsed.highestUnlockedLevel) || 1, Math.min(CAMPAIGN_CONFIG.totalLevels, highestCompleted + 1))
+    )
+  );
+  return {
+    highestUnlockedLevel,
+    completedLevels: completed,
+    openedChests,
+    unlockedRuleIds: uniqueStrings([...(plan.basicRules || []), ...unlockedRuleIds]),
+  };
+}
+
+function ensureCampaignProgress(user, plan = buildCampaignRulePlan()) {
+  hydrateUser(user);
+  user.campaign = normalizeCampaignProgress(user.campaign, plan);
+  return user.campaign;
+}
+
+function openCampaignChestForUser(user, chestIndex, plan = buildCampaignRulePlan()) {
+  const campaign = ensureCampaignProgress(user, plan);
+  const idx = Math.floor(Number(chestIndex));
+  const chestLevel = plan.chestLevels[idx];
+  if (!Number.isFinite(idx) || chestLevel == null) return { ok: false, error: "Chest not found." };
+  if (campaign.highestUnlockedLevel <= chestLevel) return { ok: false, error: "Chest is still locked." };
+  if (campaign.openedChests.includes(idx)) return { ok: true, campaign, rewards: [], alreadyOpened: true };
+
+  const unlockedSet = new Set(campaign.unlockedRuleIds || []);
+  const unopenedChestIndexes = plan.chestLevels.map((_, i) => i).filter((i) => i >= idx && !campaign.openedChests.includes(i));
+  const remainingRules = plan.unlockableRuleIds.filter((id) => !unlockedSet.has(id));
+  const remainingChestCount = unopenedChestIndexes.length || 1;
+  const rewardCount = remainingRules.length ? Math.ceil(remainingRules.length / remainingChestCount) : 0;
+  const rewards = remainingRules.slice(0, rewardCount);
+  for (const ruleId of rewards) unlockedSet.add(ruleId);
+  campaign.openedChests = uniqueNumbers([...campaign.openedChests, idx], { min: 0, max: plan.chestLevels.length - 1 });
+  campaign.unlockedRuleIds = [...unlockedSet];
+  user.campaign = normalizeCampaignProgress(campaign, plan);
+  return { ok: true, campaign: user.campaign, rewards };
+}
+
+function completeCampaignLevelForUser(user, level, won) {
+  const plan = buildCampaignRulePlan();
+  const campaign = ensureCampaignProgress(user, plan);
+  const normalizedLevel = Math.floor(Number(level));
+  if (!won || !Number.isFinite(normalizedLevel) || normalizedLevel < 1 || normalizedLevel > CAMPAIGN_CONFIG.totalLevels) {
+    return { ok: false, campaign };
+  }
+  campaign.completedLevels = uniqueNumbers([...campaign.completedLevels, normalizedLevel], { min: 1, max: CAMPAIGN_CONFIG.totalLevels });
+  campaign.highestUnlockedLevel = Math.min(
+    CAMPAIGN_CONFIG.totalLevels,
+    Math.max(campaign.highestUnlockedLevel || 1, normalizedLevel + 1)
+  );
+  user.campaign = normalizeCampaignProgress(campaign, plan);
+  const chestIndex = plan.chestLevels.indexOf(normalizedLevel);
+  if (chestIndex >= 0) openCampaignChestForUser(user, chestIndex, plan);
+  return { ok: true, campaign: user.campaign };
 }
 
 function favoriteRule(collection) {
@@ -692,6 +814,7 @@ function publicUser(user, { awardAchievements = true } = {}) {
     },
     matchHistory: user.matchHistory.slice(0, 20),
     ruleCollection: collection,
+    campaign: user.campaign,
     achievements: achievementState.achievements,
     cosmetics: cosmeticInventory(user),
     social: user.social,
@@ -874,6 +997,7 @@ app.post("/api/auth/signup", async (req, res) => {
     achievementRewards: {},
     cosmetics: {},
     social: { friends: [], rivals: [], clubs: [] },
+    campaign: createDefaultCampaignProgress(buildCampaignRulePlan()),
   };
   userStore.users[key] = user;
   saveUsers(userStore);
@@ -946,6 +1070,36 @@ app.patch("/api/me", async (req, res) => {
   saveUsers(userStore);
   await flushUserStoreWrites();
   res.json({ ok: true, user: publicUser(user) });
+});
+
+app.get("/api/me/campaign", (req, res) => {
+  const user = authedUser(req, res);
+  if (!user) return;
+  res.json({ ok: true, campaign: ensureCampaignProgress(user), user: publicUser(user) });
+});
+
+app.patch("/api/me/campaign", async (req, res) => {
+  const user = authedUser(req, res);
+  if (!user) return;
+  const action = String(req.body?.action || "");
+  const plan = buildCampaignRulePlan();
+
+  if (action === "reset") {
+    user.campaign = createDefaultCampaignProgress(plan);
+    saveUsers(userStore);
+    await flushUserStoreWrites();
+    return res.json({ ok: true, campaign: user.campaign, user: publicUser(user) });
+  }
+
+  if (action === "openChest") {
+    const result = openCampaignChestForUser(user, req.body?.chestIndex, plan);
+    if (!result.ok) return res.status(400).json(result);
+    saveUsers(userStore);
+    await flushUserStoreWrites();
+    return res.json({ ok: true, campaign: result.campaign, rewards: result.rewards || [], user: publicUser(user) });
+  }
+
+  res.status(400).json({ ok: false, error: "Unknown campaign action." });
 });
 
 app.get("/api/shop/daily", (req, res) => {
@@ -1223,8 +1377,23 @@ function emitRoomState(roomCode) {
   for (const p of entry.room.players || []) {
     if (!p?.socketId || sent.has(p.socketId)) continue;
     sent.add(p.socketId);
-    io.to(p.socketId).emit("game:state", entry.room.game.toClientState(p.id));
+    io.to(p.socketId).emit("game:state", stateForPlayer(entry.room.game, p.id));
   }
+}
+
+function campaignProgressForGamePlayer(game, playerId) {
+  if (game?.mode !== "singleplayer" || !playerId) return null;
+  const player = (game.players || []).find((p) => p.id === playerId);
+  if (!player?.userId) return null;
+  const user = hydrateUser(userById(player.userId));
+  return user ? ensureCampaignProgress(user) : null;
+}
+
+function stateForPlayer(game, playerId) {
+  const payload = game.toClientState(playerId);
+  const campaign = campaignProgressForGamePlayer(game, playerId);
+  if (campaign) payload.campaign = campaign;
+  return payload;
 }
 
 function pushEffectsAndState(roomCode) {
@@ -1241,7 +1410,7 @@ function pushEffectsAndState(roomCode) {
   for (const p of entry.room.players || []) {
     if (!p?.socketId || sent.has(p.socketId)) continue;
     sent.add(p.socketId);
-    io.to(p.socketId).emit("game:state", entry.room.game.toClientState(p.id));
+    io.to(p.socketId).emit("game:state", stateForPlayer(entry.room.game, p.id));
   }
   entry.room.game.clearTransientEffects();
   scheduleBotTurn(roomCode);
@@ -1702,6 +1871,7 @@ function recordMatchIfNeeded(code, entry) {
     user.stats.peakRating = Math.max(user.stats.peakRating || 1000, user.stats.rating);
 
     updateRuleCollection(user, game.matchStats?.ruleUses?.[color], won);
+    if (game.mode === "singleplayer") completeCampaignLevelForUser(user, game.campaignLevel, won);
     addRival(user, opponent?.name || "Chaos Bot");
     user.matchHistory.unshift({
       id: `${code}-${key}-${color}`,
@@ -1757,7 +1927,7 @@ io.on("connection", (socket) => {
     if (!pid) return cb?.({ ok: false, error: "Not in this lobby" });
     touchPlayerSocket({ code, entry, playerId: pid, socket });
     // Emit directly to this socket as a fallback when a room broadcast was missed.
-    io.to(socket.id).emit("game:state", entry.room.game.toClientState(pid));
+    io.to(socket.id).emit("game:state", stateForPlayer(entry.room.game, pid));
     cb?.({ ok: true });
   });
 
@@ -1818,12 +1988,30 @@ io.on("connection", (socket) => {
     emitOpenServers();
   });
 
-  socket.on("lobby:singleplayer", ({ authToken } = {}, cb) => {
+  socket.on("lobby:singleplayer", ({ authToken, rulePoolIds, campaignLevel } = {}, cb) => {
     const account = accountFromPayload({ authToken });
     if (!account) return cb?.({ ok: false, error: "Sign in before starting singleplayer." });
     const code = createLobbyCode((c) => rooms.has(c));
     const room = createRoom(code, { visibility: "private" });
-    room.game = new Game({ roomCode: code, debugMode: runtimeFlags.debugMode });
+    const knownRuleIds = new Set(allRules().map((rule) => rule.id));
+    const requestedPool = Array.isArray(rulePoolIds)
+      ? [...new Set(rulePoolIds.filter((id) => typeof id === "string" && knownRuleIds.has(id)))]
+      : null;
+    const normalizedCampaignLevel =
+      Number.isFinite(Number(campaignLevel)) && Number(campaignLevel) > 0 ? Math.floor(Number(campaignLevel)) : null;
+    const campaign = ensureCampaignProgress(account);
+    if (normalizedCampaignLevel && normalizedCampaignLevel > (campaign.highestUnlockedLevel || 1)) {
+      return cb?.({ ok: false, error: "That campaign level is locked." });
+    }
+    const singleplayerPool = uniqueStrings(campaign.unlockedRuleIds || []).filter((id) => knownRuleIds.has(id));
+    const filteredPool = singleplayerPool.length ? singleplayerPool : requestedPool;
+    room.game = new Game({
+      roomCode: code,
+      debugMode: runtimeFlags.debugMode,
+      mode: "singleplayer",
+      campaignLevel: normalizedCampaignLevel,
+      rulePoolIds: filteredPool && filteredPool.length ? filteredPool : null,
+    });
     rooms.set(code, { room, socketsByPlayerId: new Map(), botTimer: null });
 
     const player = room.addPlayer(socket.id, account.username);

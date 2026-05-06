@@ -517,6 +517,807 @@ body.is-connected .status::before {
   text-transform: uppercase;
 }
 
+.campaignPanel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: clamp(14px, 2vw, 22px);
+}
+
+.campaignHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.campaignHeadCopy {
+  display: grid;
+  gap: 8px;
+}
+
+.campaignHeadCopy p {
+  color: rgba(249, 251, 255, 0.72);
+  line-height: 1.4;
+}
+
+.campaignHeaderActions {
+  display: grid;
+  gap: 8px;
+}
+
+.campaignSummary {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  background: rgba(5, 12, 25, 0.42);
+  padding: 10px 12px;
+  color: rgba(249, 251, 255, 0.84);
+  font-size: 14px;
+}
+
+.campaignMap {
+  min-height: 0;
+  overflow: hidden;
+  padding-right: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  cursor: grab;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(255, 255, 255, 0.2) 0 1px, transparent 2px),
+    radial-gradient(circle at 70% 12%, rgba(255, 255, 255, 0.16) 0 1px, transparent 2px),
+    radial-gradient(circle at 84% 28%, rgba(255, 255, 255, 0.14) 0 1px, transparent 2px),
+    radial-gradient(circle at 26% 76%, rgba(255, 255, 255, 0.12), transparent 36%),
+    radial-gradient(circle at 86% 72%, rgba(255, 255, 255, 0.1), transparent 40%),
+    linear-gradient(180deg, #0e2f73 0%, #1f63c3 52%, #12479a 100%);
+}
+
+.campaignMap.is-grabbing {
+  cursor: grabbing;
+}
+
+.overworldScene {
+  position: relative;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+.mapWorldLabel {
+  position: absolute;
+  z-index: 1;
+  min-height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(5, 12, 25, 0.54);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 860;
+  padding: 5px 10px;
+  letter-spacing: 0.02em;
+}
+
+.mapIsland {
+  position: absolute;
+  z-index: 0;
+  border-radius: 42% 58% 56% 44% / 48% 46% 54% 52%;
+  border: 2px solid rgba(9, 28, 8, 0.35);
+  background: linear-gradient(180deg, #82de72 0%, #5ec45d 68%, #45974a 100%);
+  box-shadow: 0 28px 0 rgba(173, 115, 63, 0.86), 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.mapIsland::after {
+  content: "";
+  position: absolute;
+  inset: 16% 12%;
+  border-radius: 46%;
+  border: 2px solid rgba(246, 244, 208, 0.88);
+  opacity: 0.25;
+}
+
+.mapIsland.low {
+  box-shadow: 0 22px 0 rgba(163, 109, 59, 0.86), 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+.mapIsland.mid {
+  box-shadow: 0 34px 0 rgba(173, 115, 63, 0.86), 0 20px 42px rgba(0, 0, 0, 0.34);
+}
+
+.mapIsland.high {
+  box-shadow: 0 46px 0 rgba(152, 95, 50, 0.9), 0 24px 50px rgba(0, 0, 0, 0.38);
+}
+
+.mapIsland.grass {
+  background: linear-gradient(180deg, #89e37a 0%, #60c85f 64%, #46984a 100%);
+}
+
+.mapIsland.forest {
+  background: linear-gradient(180deg, #76cc68 0%, #3f9747 66%, #2a6d38 100%);
+}
+
+.mapIsland.swamp {
+  background: linear-gradient(180deg, #8aac63 0%, #6b8a48 62%, #4a6231 100%);
+}
+
+.mapIsland.desert {
+  background: linear-gradient(180deg, #dcbc84 0%, #c9a872 64%, #a38756 100%);
+}
+
+.mapIsland.ice {
+  background: linear-gradient(180deg, #b2ddff 0%, #86bfe8 62%, #5e98ca 100%);
+}
+
+.mapIsland.volcano {
+  background: linear-gradient(180deg, #8f8a81 0%, #66645f 58%, #413c36 100%);
+}
+
+.mapIsland.ruins {
+  background: linear-gradient(180deg, #9ec28a 0%, #75956a 60%, #53654b 100%);
+}
+
+.mapIsland.sky {
+  background: linear-gradient(180deg, #d7efff 0%, #9dd2ff 58%, #74aee6 100%);
+}
+
+.mapIsland.citadel {
+  background: linear-gradient(180deg, #ccb79a 0%, #a4876c 60%, #775a44 100%);
+}
+
+.mapIsland.hills {
+  background: linear-gradient(180deg, #8adf80 0%, #5bbf60 64%, #3b8848 100%);
+}
+
+.mapIsland.cliff {
+  background: linear-gradient(180deg, #90dc86 0%, #62c765 62%, #3d8d4a 100%);
+}
+
+.mapSetpiece {
+  position: absolute;
+  z-index: 2;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  background: rgba(10, 20, 38, 0.46);
+  box-shadow: 0 14px 22px rgba(0, 0, 0, 0.28);
+}
+
+.mapSetpiece::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 7px;
+  border: 2px solid rgba(255, 255, 255, 0.32);
+}
+
+.mapSetpiece.castle::before { background: linear-gradient(180deg, #6f7da0, #495777); }
+.mapSetpiece.tower::before { background: linear-gradient(180deg, #8c9dc0, #627399); }
+.mapSetpiece.waterfall::before { background: linear-gradient(180deg, #9dd8ff, #4e8cd6); }
+.mapSetpiece.bridge::before { background: linear-gradient(180deg, #c7a47b, #8c6642); }
+.mapSetpiece.ruin::before { background: linear-gradient(180deg, #a79b8b, #7b6c5b); }
+.mapSetpiece.ship::before { background: linear-gradient(180deg, #d9b78a, #9a6f44); }
+.mapSetpiece.gate::before { background: linear-gradient(180deg, #ffe37c, #caa53d); }
+.mapSetpiece.observatory::before { background: linear-gradient(180deg, #d0c7ff, #7d70d0); }
+.mapSetpiece.fort::before { background: linear-gradient(180deg, #a4b19b, #6d7a66); }
+.mapSetpiece.spire::before { background: linear-gradient(180deg, #dfc7a8, #9d7f5d); }
+
+.overworldRoutes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.routeLine {
+  stroke: #efe4c2;
+  stroke-width: 12;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 0 rgba(38, 30, 12, 0.35));
+}
+
+.routeDot {
+  fill: #f8f0db;
+}
+
+.routeDot.chestDot {
+  fill: #ffde7d;
+}
+
+.worldNode,
+.worldChest {
+  position: absolute;
+  z-index: 3;
+  min-height: 0;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  padding: 0;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  display: grid;
+  place-items: center;
+}
+
+.worldDot {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(92, 12, 20, 0.82);
+  background: radial-gradient(circle at 36% 32%, #ffb3b7 0%, #e33e46 42%, #ba1f2a 100%);
+  box-shadow: 0 2px 0 rgba(31, 6, 10, 0.5);
+}
+
+.worldLabel {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translate(-50%, 4px);
+  min-width: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(10, 20, 38, 0.7);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 10px;
+  font-weight: 840;
+  line-height: 1;
+  padding: 3px 6px;
+}
+
+.worldChest {
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+}
+
+.chestIcon {
+  width: 24px;
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid rgba(106, 65, 18, 0.9);
+  background:
+    linear-gradient(180deg, rgba(255, 228, 129, 0.9), rgba(224, 156, 37, 0.9)),
+    linear-gradient(90deg, #8b5524, #a8682c);
+  box-shadow: 0 2px 0 rgba(35, 20, 6, 0.42);
+}
+
+.worldNode.completed .worldDot {
+  border-color: rgba(48, 84, 8, 0.82);
+  background: radial-gradient(circle at 36% 32%, #fff8c6 0%, #ffd95e 38%, #d7a824 100%);
+}
+
+.worldNode.current .worldDot {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(255, 209, 102, 0.22), 0 2px 0 rgba(31, 6, 10, 0.5);
+}
+
+.worldNode.locked .worldDot {
+  border-color: rgba(28, 35, 57, 0.7);
+  background: radial-gradient(circle at 36% 32%, #9ba8be 0%, #617089 40%, #39465c 100%);
+}
+
+.worldNode.locked .worldLabel,
+.worldChest.locked .worldLabel {
+  opacity: 0.65;
+}
+
+.worldChest.ready .chestIcon {
+  box-shadow: 0 0 0 4px rgba(255, 209, 102, 0.2), 0 2px 0 rgba(35, 20, 6, 0.42);
+}
+
+.worldChest.opened .chestIcon {
+  border-color: rgba(48, 84, 8, 0.82);
+  background:
+    linear-gradient(180deg, rgba(228, 255, 174, 0.95), rgba(124, 190, 51, 0.92)),
+    linear-gradient(90deg, #5e8330, #79ab3f);
+}
+
+.worldChest.locked .chestIcon {
+  border-color: rgba(29, 37, 58, 0.8);
+  background:
+    linear-gradient(180deg, rgba(154, 167, 189, 0.9), rgba(99, 112, 133, 0.9)),
+    linear-gradient(90deg, #4d5a70, #60738e);
+}
+
+.campaignMap {
+  border: 3px solid rgba(30, 70, 134, 0.75);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(255, 255, 255, 0.34) 0 2px, transparent 3px),
+    radial-gradient(circle at 74% 16%, rgba(255, 255, 255, 0.28) 0 2px, transparent 3px),
+    radial-gradient(circle at 45% 72%, rgba(255, 255, 255, 0.22) 0 2px, transparent 3px),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0 8px, transparent 8px 28px),
+    linear-gradient(180deg, #5da8ff 0%, #3386ee 46%, #1d62c9 100%);
+  background-size: auto, auto, auto, 42px 42px, auto;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18), inset 0 -28px 70px rgba(12, 58, 137, 0.32);
+}
+
+.overworldScene {
+  isolation: isolate;
+}
+
+.mapWorldLabel {
+  z-index: 6;
+  border-radius: 6px;
+  border: 2px solid rgba(102, 68, 29, 0.62);
+  background: linear-gradient(180deg, #fff6cf, #f0d984);
+  color: #60431e;
+  padding: 5px 9px;
+  letter-spacing: 0;
+  box-shadow: 0 3px 0 rgba(95, 67, 32, 0.36);
+}
+
+.mapIsland {
+  overflow: visible;
+  border: 3px solid rgba(29, 82, 37, 0.72);
+  border-radius: 28% 44% 36% 31% / 30% 34% 28% 38%;
+  background:
+    radial-gradient(circle at 28% 30%, rgba(255, 255, 255, 0.14) 0 16%, transparent 17%),
+    linear-gradient(180deg, #95ee76 0%, #58c84f 62%, #36923e 100%);
+  box-shadow:
+    0 34px 0 #b87949,
+    0 38px 0 rgba(83, 47, 28, 0.58),
+    0 22px 34px rgba(17, 49, 85, 0.36);
+}
+
+.mapIsland::after {
+  inset: 12px;
+  border-radius: inherit;
+  border: 2px solid rgba(255, 246, 200, 0.34);
+  opacity: 1;
+  pointer-events: none;
+}
+
+.mapIsland.low {
+  box-shadow:
+    0 24px 0 #b87949,
+    0 28px 0 rgba(83, 47, 28, 0.52),
+    0 18px 30px rgba(17, 49, 85, 0.3);
+}
+
+.mapIsland.mid {
+  box-shadow:
+    0 36px 0 #b87949,
+    0 40px 0 rgba(83, 47, 28, 0.58),
+    0 22px 38px rgba(17, 49, 85, 0.34);
+}
+
+.mapIsland.high {
+  box-shadow:
+    0 50px 0 #b26e3f,
+    0 55px 0 rgba(74, 40, 24, 0.62),
+    0 28px 48px rgba(17, 49, 85, 0.38);
+}
+
+.mapIsland.grass {
+  background:
+    radial-gradient(circle at 70% 26%, rgba(255, 255, 255, 0.13) 0 13%, transparent 14%),
+    linear-gradient(180deg, #9af47a 0%, #5fd051 66%, #399a41 100%);
+}
+
+.mapIsland.forest {
+  background:
+    radial-gradient(circle at 22% 24%, rgba(191, 255, 145, 0.2) 0 13%, transparent 14%),
+    linear-gradient(180deg, #7bd864 0%, #43a646 64%, #267438 100%);
+}
+
+.mapIsland.swamp {
+  background: linear-gradient(180deg, #a7c36b 0%, #75964a 64%, #536a35 100%);
+}
+
+.mapIsland.desert {
+  border-color: rgba(122, 91, 44, 0.74);
+  background:
+    radial-gradient(circle at 30% 38%, rgba(255, 248, 202, 0.24) 0 12%, transparent 13%),
+    linear-gradient(180deg, #ead391 0%, #d0ad68 66%, #ab8150 100%);
+}
+
+.mapIsland.ice {
+  border-color: rgba(65, 132, 176, 0.74);
+  background:
+    radial-gradient(circle at 66% 28%, rgba(255, 255, 255, 0.34) 0 14%, transparent 15%),
+    linear-gradient(180deg, #d6f3ff 0%, #91d0ef 64%, #62a7d6 100%);
+}
+
+.mapIsland.volcano {
+  border-color: rgba(55, 58, 67, 0.78);
+  background:
+    radial-gradient(circle at 52% 28%, rgba(247, 210, 112, 0.28) 0 13%, transparent 14%),
+    linear-gradient(180deg, #8d8a80 0%, #5e6168 58%, #353b47 100%);
+}
+
+.mapIsland.ruins {
+  background: linear-gradient(180deg, #a9c98f 0%, #779f66 64%, #526c47 100%);
+}
+
+.mapIsland.sky {
+  border-color: rgba(97, 137, 169, 0.7);
+  background:
+    radial-gradient(circle at 36% 32%, rgba(255, 255, 255, 0.44) 0 12%, transparent 13%),
+    linear-gradient(180deg, #dfffff 0%, #b8f1d9 50%, #86d6b6 100%);
+  box-shadow:
+    0 28px 0 #a893d6,
+    0 32px 0 rgba(70, 52, 106, 0.46),
+    0 22px 42px rgba(17, 49, 85, 0.34);
+}
+
+.mapIsland.hills {
+  background:
+    radial-gradient(circle at 20% 32%, rgba(255, 255, 255, 0.13) 0 13%, transparent 14%),
+    linear-gradient(180deg, #8eea77 0%, #58c65a 64%, #368943 100%);
+}
+
+.mapIsland.cliff {
+  background:
+    radial-gradient(circle at 72% 32%, rgba(255, 255, 255, 0.14) 0 13%, transparent 14%),
+    linear-gradient(180deg, #91df80 0%, #5cc865 62%, #3f934a 100%);
+}
+
+.mapIsland.chunk-a { border-radius: 24% 42% 26% 34% / 30% 26% 35% 40%; }
+.mapIsland.chunk-b { border-radius: 36% 24% 40% 28% / 25% 34% 28% 42%; }
+.mapIsland.chunk-c { border-radius: 30% 42% 34% 29% / 32% 26% 38% 30%; }
+.mapIsland.chunk-d { border-radius: 20% 36% 25% 42% / 33% 28% 39% 29%; }
+.mapIsland.chunk-e { border-radius: 42% 27% 34% 28% / 25% 38% 29% 39%; }
+.mapIsland.chunk-f { border-radius: 27% 40% 26% 36% / 29% 31% 39% 34%; }
+.mapIsland.chunk-g { border-radius: 40% 36% 28% 34% / 26% 30% 42% 36%; }
+.mapIsland.chunk-h { border-radius: 26% 38% 42% 28% / 30% 25% 34% 44%; }
+.mapIsland.chunk-i { border-radius: 38% 26% 33% 37% / 28% 34% 42% 26%; }
+
+.mapIsland.star {
+  clip-path: polygon(50% 0, 61% 27%, 92% 23%, 72% 47%, 96% 66%, 65% 68%, 50% 95%, 35% 68%, 4% 66%, 28% 47%, 8% 23%, 39% 27%);
+}
+
+.mapSetpiece {
+  z-index: 4;
+  width: 58px;
+  height: 58px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.mapSetpiece::before {
+  left: 8px;
+  right: 8px;
+  bottom: 5px;
+  top: auto;
+  height: 36px;
+  border: 3px solid rgba(58, 45, 36, 0.58);
+  border-radius: 5px 5px 7px 7px;
+  box-shadow: 0 4px 0 rgba(39, 24, 18, 0.32);
+}
+
+.mapSetpiece::after {
+  content: "";
+  position: absolute;
+  left: 23px;
+  bottom: 5px;
+  width: 12px;
+  height: 18px;
+  border-radius: 8px 8px 0 0;
+  background: rgba(35, 29, 38, 0.66);
+}
+
+.mapSetpiece.castle::before {
+  background:
+    linear-gradient(90deg, #7f8faf 0 16%, transparent 16% 28%, #7f8faf 28% 44%, transparent 44% 56%, #7f8faf 56% 72%, transparent 72% 84%, #7f8faf 84%),
+    linear-gradient(180deg, #a7b3cf 0%, #687a9d 100%);
+}
+
+.mapSetpiece.tower::before {
+  left: 16px;
+  right: 16px;
+  height: 48px;
+  background:
+    linear-gradient(90deg, #70c05c 0 20%, transparent 20% 80%, #70c05c 80%),
+    linear-gradient(180deg, #c9925e 0%, #b06e43 100%);
+}
+
+.mapSetpiece.tower::after {
+  left: 14px;
+  bottom: 49px;
+  width: 30px;
+  height: 12px;
+  border-radius: 10px 10px 3px 3px;
+  background: #6bd657;
+  border: 3px solid rgba(38, 89, 38, 0.62);
+}
+
+.mapSetpiece.waterfall::before {
+  background:
+    linear-gradient(90deg, transparent 0 36%, #78c8ff 36% 64%, transparent 64%),
+    linear-gradient(180deg, #8e8f96 0%, #535a66 100%);
+}
+
+.mapSetpiece.bridge::before {
+  height: 18px;
+  bottom: 20px;
+  background:
+    repeating-linear-gradient(90deg, #7d5431 0 7px, #b9854f 7px 13px),
+    linear-gradient(180deg, #c9965d, #8a5b35);
+}
+
+.mapSetpiece.ruin::before {
+  background: linear-gradient(180deg, #c3b194, #8f806c);
+  clip-path: polygon(0 26%, 20% 26%, 20% 8%, 43% 8%, 43% 28%, 64% 28%, 64% 0, 100% 0, 100% 100%, 0 100%);
+}
+
+.mapSetpiece.gate::before {
+  background: linear-gradient(180deg, #ffe983, #d1a940);
+  clip-path: polygon(50% 0, 62% 34%, 98% 34%, 68% 54%, 80% 92%, 50% 70%, 20% 92%, 32% 54%, 2% 34%, 38% 34%);
+}
+
+.mapSetpiece.gate::after {
+  display: none;
+}
+
+.mapSetpiece.observatory::before {
+  background:
+    radial-gradient(circle at 50% 26%, #eef3ff 0 20%, transparent 21%),
+    linear-gradient(180deg, #d0c7ff, #8172d8);
+}
+
+.mapSetpiece.fort::before { background: linear-gradient(180deg, #9aa68f, #66745e); }
+.mapSetpiece.spire::before { background: linear-gradient(180deg, #dfc7a8, #9d7f5d); }
+
+.mapDecor {
+  --s: 42px;
+  position: absolute;
+  z-index: 3;
+  width: var(--s);
+  height: var(--s);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.mapDecor.hill,
+.mapDecor.hill.small {
+  height: calc(var(--s) * 0.72);
+  border: 3px solid rgba(38, 105, 40, 0.7);
+  border-radius: 999px 999px 10px 10px;
+  background: linear-gradient(180deg, #82e66c, #48ad45);
+  box-shadow: inset 0 8px 0 rgba(255, 255, 255, 0.16);
+}
+
+.mapDecor.hill::after,
+.mapDecor.hill.small::after {
+  content: "";
+  position: absolute;
+  left: 36%;
+  top: 38%;
+  width: 5px;
+  height: 8px;
+  border-radius: 999px;
+  background: #236332;
+  box-shadow: 18px 0 0 #236332;
+}
+
+.mapDecor.trees {
+  background:
+    radial-gradient(circle at 22% 60%, #2f8e3b 0 16%, transparent 17%),
+    radial-gradient(circle at 42% 38%, #42a947 0 18%, transparent 19%),
+    radial-gradient(circle at 66% 56%, #257d36 0 17%, transparent 18%);
+}
+
+.mapDecor.forest {
+  background:
+    radial-gradient(circle at 10% 54%, #236f35 0 10%, transparent 11%),
+    radial-gradient(circle at 24% 36%, #338f3b 0 12%, transparent 13%),
+    radial-gradient(circle at 38% 58%, #226d34 0 11%, transparent 12%),
+    radial-gradient(circle at 52% 34%, #369a3f 0 12%, transparent 13%),
+    radial-gradient(circle at 68% 58%, #226f35 0 11%, transparent 12%),
+    radial-gradient(circle at 82% 40%, #318d3b 0 12%, transparent 13%);
+}
+
+.mapDecor.pipe {
+  width: calc(var(--s) * 0.72);
+  height: var(--s);
+  border: 3px solid rgba(20, 73, 32, 0.72);
+  border-radius: 4px 4px 8px 8px;
+  background: linear-gradient(90deg, #1c8d3b 0 20%, #6be35d 20% 68%, #228f3d 68%);
+  box-shadow: 0 4px 0 rgba(31, 63, 34, 0.42);
+}
+
+.mapDecor.pipe::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  top: -9px;
+  height: 17px;
+  border: 3px solid rgba(20, 73, 32, 0.72);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #80ee63, #33aa43);
+}
+
+.mapDecor.rocks,
+.mapDecor.bones {
+  background:
+    radial-gradient(circle at 18% 76%, #9f927c 0 10%, transparent 11%),
+    radial-gradient(circle at 36% 52%, #beb09a 0 11%, transparent 12%),
+    radial-gradient(circle at 58% 70%, #8e826e 0 10%, transparent 11%),
+    radial-gradient(circle at 78% 42%, #c8baa2 0 11%, transparent 12%);
+}
+
+.mapDecor.bones {
+  filter: saturate(0.55) brightness(1.2);
+}
+
+.mapDecor.water {
+  height: calc(var(--s) * 0.54);
+  border: 3px solid rgba(47, 111, 170, 0.72);
+  border-radius: 45% 55% 50% 46%;
+  background:
+    radial-gradient(circle at 35% 42%, rgba(255, 255, 255, 0.62) 0 8%, transparent 9%),
+    linear-gradient(180deg, #9bddff, #4497e7);
+}
+
+.mapDecor.bridge {
+  height: calc(var(--s) * 0.34);
+  border-radius: 5px;
+  border: 2px solid rgba(82, 55, 34, 0.65);
+  background:
+    repeating-linear-gradient(90deg, #704a2e 0 8px, #b7824d 8px 15px),
+    linear-gradient(180deg, #c8945c, #8a5834);
+}
+
+.mapDecor.ladder {
+  width: calc(var(--s) * 0.36);
+  height: var(--s);
+  border-left: 4px solid #d9c08b;
+  border-right: 4px solid #d9c08b;
+  background: repeating-linear-gradient(180deg, transparent 0 9px, #d9c08b 9px 13px);
+}
+
+.mapDecor.flower {
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, #ffeaa2 0 14%, transparent 15%),
+    radial-gradient(circle at 50% 16%, #ef4b45 0 16%, transparent 17%),
+    radial-gradient(circle at 82% 50%, #ef4b45 0 16%, transparent 17%),
+    radial-gradient(circle at 50% 82%, #ef4b45 0 16%, transparent 17%),
+    radial-gradient(circle at 18% 50%, #ef4b45 0 16%, transparent 17%);
+}
+
+.mapDecor.iceberg {
+  background: linear-gradient(180deg, #f5fcff, #a8dff6);
+  clip-path: polygon(52% 0, 100% 86%, 0 86%);
+  filter: drop-shadow(0 3px 0 rgba(73, 120, 152, 0.35));
+}
+
+.mapDecor.cloud {
+  height: calc(var(--s) * 0.46);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 28% 42%, #fff 0 24%, transparent 25%),
+    radial-gradient(circle at 48% 28%, #fff 0 30%, transparent 31%),
+    radial-gradient(circle at 70% 44%, #fff 0 25%, transparent 26%),
+    linear-gradient(180deg, #fff, #dff4ff);
+  filter: drop-shadow(0 4px 0 rgba(100, 134, 170, 0.22));
+}
+
+.overworldRoutes {
+  z-index: 2;
+}
+
+.routeLine {
+  fill: none;
+  stroke: #fff2c1;
+  stroke-width: 18;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 3px 0 rgba(123, 82, 39, 0.34));
+}
+
+.routeLineInterworld {
+  stroke: #f8efd2;
+  stroke-width: 7;
+  stroke-dasharray: 12 9;
+  stroke-linecap: butt;
+  opacity: 0.78;
+  filter: drop-shadow(0 2px 0 rgba(80, 64, 38, 0.22));
+}
+
+.routeDot {
+  fill: #fff7d6;
+  stroke: #c9a955;
+  stroke-width: 3;
+}
+
+.routeDot.chestDot {
+  fill: #ffe37c;
+}
+
+.worldNode,
+.worldChest {
+  z-index: 5;
+}
+
+.worldDot {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(102, 31, 21, 0.86);
+  background: radial-gradient(circle at 35% 30%, #ffc2b0 0%, #e94c39 44%, #b92322 100%);
+  box-shadow: 0 3px 0 rgba(62, 24, 16, 0.45);
+}
+
+.worldLabel {
+  border-radius: 5px;
+  border: 1px solid rgba(93, 66, 32, 0.44);
+  background: rgba(255, 246, 211, 0.9);
+  color: #5f3b20;
+}
+
+.chestIcon {
+  position: relative;
+  width: 27px;
+  height: 21px;
+  background:
+    linear-gradient(180deg, rgba(255, 232, 124, 0.95), rgba(221, 145, 33, 0.95)),
+    linear-gradient(90deg, #8b5524, #a8682c);
+}
+
+.chestIcon::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 7px;
+  height: 3px;
+  background: rgba(100, 61, 26, 0.56);
+}
+
+.chestIcon::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 6px;
+  width: 5px;
+  height: 7px;
+  border-radius: 2px;
+  background: #fff1a8;
+  border: 1px solid rgba(106, 65, 18, 0.68);
+}
+
+.worldNode.completed .worldDot {
+  border-color: rgba(37, 101, 33, 0.9);
+  background: radial-gradient(circle at 36% 32%, #d9ffc4 0%, #76d85e 42%, #329345 100%);
+}
+
+.worldNode.completed .worldDot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  background: #f7ffd7;
+  clip-path: polygon(50% 0, 61% 34%, 98% 35%, 68% 55%, 79% 91%, 50% 70%, 21% 91%, 32% 55%, 2% 35%, 39% 34%);
+}
+
+.worldNode.current .worldDot {
+  box-shadow: 0 0 0 5px rgba(255, 239, 136, 0.42), 0 3px 0 rgba(62, 24, 16, 0.45);
+}
+
+.worldNode.locked .worldDot {
+  border-color: rgba(56, 64, 80, 0.72);
+  background: radial-gradient(circle at 36% 32%, #d5dae5 0%, #8792a5 42%, #586274 100%);
+}
+
+@media (max-width: 980px) {
+  .campaignHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .campaignHeaderActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .helpPanel {
   height: 100%;
   display: flex;
@@ -2231,6 +3032,27 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   color: #111827;
   border-color: rgba(255, 255, 255, 0.32);
   background: linear-gradient(135deg, var(--gold), var(--aqua));
+  font-weight: 860;
+}
+
+.profileSubtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.profileSubtabs button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.profileSubtabs button.active {
+  color: #111827;
+  border-color: rgba(255, 255, 255, 0.32);
+  background: linear-gradient(135deg, var(--aqua), var(--gold));
   font-weight: 860;
 }
 

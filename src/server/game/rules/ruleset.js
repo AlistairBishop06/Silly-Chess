@@ -1137,7 +1137,8 @@ const RULES = [
         "inst_lawnmower",
         "inst_backup_plan",
       ]);
-      const instantRules = RULES.filter((r) => r.kind === "instant" && !autoSafe.has(r.id));
+      const allowedPool = Array.isArray(game?.rulePoolIds) && game.rulePoolIds.length ? new Set(game.rulePoolIds) : null;
+      const instantRules = RULES.filter((r) => r.kind === "instant" && !autoSafe.has(r.id) && (!allowedPool || allowedPool.has(r.id)));
       for (const color of ["w", "b"]) {
         const player = game.players?.find((p) => p.color === color);
         const rule = instantRules[randInt(instantRules.length)];

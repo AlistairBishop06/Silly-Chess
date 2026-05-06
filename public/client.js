@@ -29,6 +29,11 @@ const els = {
   adminTabBtn: document.getElementById("adminTabBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
   singleplayerBtn: document.getElementById("singleplayerBtn"),
+  campaignPanel: document.getElementById("campaignPanel"),
+  campaignBackBtn: document.getElementById("campaignBackBtn"),
+  campaignSummary: document.getElementById("campaignSummary"),
+  campaignMap: document.getElementById("campaignMap"),
+  campaignNotice: document.getElementById("campaignNotice"),
   createBtn: document.getElementById("createBtn"),
   createModal: document.getElementById("createModal"),
   createCloseBtn: document.getElementById("createCloseBtn"),
@@ -117,6 +122,7 @@ const ctx = els.canvas.getContext("2d");
 
 const state = {
   connected: false,
+  view: "lobby",
   lobby: null,
   playerId: null,
   color: null,
@@ -152,9 +158,11 @@ const state = {
   account: null,
   authMode: "login",
   profileTab: "overview",
+  profileRulesTab: "multiplayer",
   viewedProfile: null,
   viewedProfileReadOnly: false,
   lastProfileResultKey: null,
+  lastCampaignResultKey: null,
   adminUsers: null,
   adminFlags: null,
   adminSelectedUserId: null,
@@ -162,6 +170,14 @@ const state = {
   activeEmotes: {},
   dailyShop: null,
   shopClockOffset: 0,
+  campaign: null,
+  campaignRuleCatalog: null,
+  campaignLayout: null,
+  campaignPan: null,
+  campaignPanBound: false,
+  campaignSuppressClickUntil: 0,
+  campaignPanLayoutKey: "",
+  activeCampaignLevel: null,
 };
 
 const confetti = {
@@ -173,14 +189,39 @@ const confetti = {
 const CARD_POPUP_HOLD_MS = 2000;
 const CARD_POPUP_EXIT_MS = 560;
 const CARD_POPUP_ENTER_MS = Math.max(240, CARD_POPUP_HOLD_MS - CARD_POPUP_EXIT_MS);
+const CAMPAIGN_CONFIG = {
+  totalLevels: 100,
+  levelsPerWorld: 10,
+  chestEvery: 3,
+  basicRuleIds: [
+    "inst_oops_explosion",
+    "inst_pawn_herding",
+    "inst_rps_duel",
+    "inst_swap_queens",
+    "inst_coinflip_wager",
+  ],
+  excludedFromCampaignPool: [],
+};
+const CAMPAIGN_BIOMES = [
+  "grass",
+  "forest",
+  "cliff",
+  "swamp",
+  "desert",
+  "ice",
+  "volcano",
+  "ruins",
+  "sky",
+  "citadel",
+];
 
 const PIECE_GLYPH_MONO = {
-  p: "â™™",
-  n: "â™˜",
-  b: "â™—",
-  r: "â™–",
-  q: "â™•",
-  k: "â™”",
+  p: "\u2659",
+  n: "\u2658",
+  b: "\u2657",
+  r: "\u2656",
+  q: "\u2655",
+  k: "\u2654",
 };
 
 function sqToAlg(sq) {
@@ -315,6 +356,7 @@ function startConfetti() {
 
 function resetToLobby(reason) {
   if (reason) logLine(`<strong>Lobby</strong>: ${escapeHtml(reason)}`);
+  state.view = "lobby";
   state.lobby = null;
   state.playerId = null;
   state.color = null;
@@ -326,6 +368,7 @@ function resetToLobby(reason) {
   state.lastRematchId = null;
   state.lastStateAt = 0;
   state.lastSyncAt = 0;
+  state.activeCampaignLevel = null;
   state.supplyDrops = [];
   state.activeEmotes = {};
   clearAds();
@@ -335,6 +378,7 @@ function resetToLobby(reason) {
 }
 
 function enterLobby({ code, playerId, color }) {
+  state.view = "game";
   state.lobby = code;
   state.playerId = playerId;
   state.color = color;
@@ -379,6 +423,940 @@ function saveSession() {
     localStorage.setItem("chaosChessSession", JSON.stringify({ lobby: state.lobby, playerId: state.playerId, color: state.color }));
   } catch {
     // ignore
+  }
+}
+
+function campaignChestMilestones() {
+  const out = [];
+  for (let level = CAMPAIGN_CONFIG.chestEvery; level < CAMPAIGN_CONFIG.totalLevels; level += CAMPAIGN_CONFIG.chestEvery) {
+    out.push(level);
+  }
+  return out;
+}
+
+function uniqueStrings(arr) {
+  return [...new Set((Array.isArray(arr) ? arr : []).filter((id) => typeof id === "string"))];
+}
+
+function uniqueNumbers(arr, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) {
+  return [...new Set((Array.isArray(arr) ? arr : []).map((value) => Number(value)).filter((n) => Number.isFinite(n) && n >= min && n <= max))];
+}
+
+async function ensureCampaignRuleCatalog() {
+  if (Array.isArray(state.campaignRuleCatalog) && state.campaignRuleCatalog.length) return state.campaignRuleCatalog;
+  const res = await fetch("/api/rules", { cache: "no-store" });
+  const json = await res.json();
+  if (!res.ok || !json?.ok || !Array.isArray(json.rules)) throw new Error("Failed to load rules.");
+  state.campaignRuleCatalog = json.rules;
+  return state.campaignRuleCatalog;
+}
+
+function buildCampaignRulePlan(ruleCatalog) {
+  const allRuleIds = uniqueStrings((ruleCatalog || []).map((rule) => rule.id));
+  const fallbackBasics = allRuleIds.slice(0, Math.min(6, allRuleIds.length));
+  const startingRuleIds = uniqueStrings(CAMPAIGN_CONFIG.basicRuleIds).filter((id) => allRuleIds.includes(id));
+  const basicRules = startingRuleIds.length ? startingRuleIds : fallbackBasics;
+  const excluded = new Set(uniqueStrings(CAMPAIGN_CONFIG.excludedFromCampaignPool));
+  const unlockableRuleIds = allRuleIds.filter((id) => !basicRules.includes(id) && !excluded.has(id));
+  const chestLevels = campaignChestMilestones();
+  return {
+    allRuleIds,
+    basicRules,
+    unlockableRuleIds,
+    chestLevels,
+  };
+}
+
+function createDefaultCampaignProgress(plan) {
+  return {
+    highestUnlockedLevel: 1,
+    completedLevels: [],
+    openedChests: [],
+    unlockedRuleIds: uniqueStrings(plan?.basicRules || []),
+  };
+}
+
+function normalizeCampaignProgress(raw, plan) {
+  const parsed = raw && typeof raw === "object" ? raw : {};
+  const completed = uniqueNumbers(parsed.completedLevels, { min: 1, max: CAMPAIGN_CONFIG.totalLevels });
+  const openedChests = uniqueNumbers(parsed.openedChests, { min: 0, max: campaignChestMilestones().length - 1 });
+  const unlockedRuleIds = uniqueStrings(parsed.unlockedRuleIds).filter((id) => plan.allRuleIds.includes(id));
+  const highestCompleted = completed.length ? Math.max(...completed) : 0;
+  const highestUnlockedLevel = Math.max(
+    1,
+    Math.min(
+      CAMPAIGN_CONFIG.totalLevels,
+      Math.max(Number(parsed.highestUnlockedLevel) || 1, Math.min(CAMPAIGN_CONFIG.totalLevels, highestCompleted + 1))
+    )
+  );
+  const mergedUnlocked = uniqueStrings([...(plan.basicRules || []), ...unlockedRuleIds]);
+  return {
+    highestUnlockedLevel,
+    completedLevels: completed,
+    openedChests,
+    unlockedRuleIds: mergedUnlocked,
+  };
+}
+
+function saveCampaignProgress() {
+  if (state.account && state.campaign) state.account.campaign = state.campaign;
+}
+
+function loadCampaignProgress(plan) {
+  state.campaign = normalizeCampaignProgress(state.account?.campaign, plan);
+  saveCampaignProgress();
+}
+
+function ruleNameById(ruleId) {
+  return state.campaignRuleCatalog?.find((rule) => rule.id === ruleId)?.name || ruleId;
+}
+
+function createSvg(tag) {
+  return document.createElementNS("http://www.w3.org/2000/svg", tag);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function campaignWorldTemplate(worldIndex) {
+  const templates = [
+    {
+      x: 160,
+      y: 2880,
+      w: 620,
+      h: 410,
+      biome: "grass",
+      elevation: "low",
+      shape: "chunk-a",
+      setpiece: "tower",
+      setpieceAt: [0.16, 0.28],
+      labelAt: [0.08, 0.12],
+      path: [
+        [0.14, 0.77],
+        [0.27, 0.66],
+        [0.39, 0.76],
+        [0.54, 0.63],
+        [0.69, 0.70],
+        [0.82, 0.55],
+        [0.70, 0.38],
+        [0.55, 0.30],
+        [0.36, 0.39],
+        [0.22, 0.28],
+      ],
+      decorations: [
+        ["hill", 0.08, 0.55, 74],
+        ["hill small", 0.19, 0.51, 46],
+        ["pipe", 0.68, 0.50, 40],
+        ["trees", 0.43, 0.42, 72],
+        ["flower", 0.77, 0.28, 28],
+      ],
+    },
+    {
+      x: 150,
+      y: 2260,
+      w: 700,
+      h: 430,
+      biome: "hills",
+      elevation: "mid",
+      shape: "chunk-b",
+      setpiece: "bridge",
+      setpieceAt: [0.83, 0.48],
+      labelAt: [0.08, 0.14],
+      path: [
+        [0.12, 0.72],
+        [0.22, 0.56],
+        [0.22, 0.34],
+        [0.39, 0.27],
+        [0.57, 0.34],
+        [0.72, 0.44],
+        [0.61, 0.63],
+        [0.43, 0.74],
+        [0.28, 0.72],
+        [0.13, 0.84],
+      ],
+      decorations: [
+        ["hill", 0.08, 0.22, 70],
+        ["hill small", 0.21, 0.18, 42],
+        ["pipe", 0.55, 0.55, 42],
+        ["ladder", 0.24, 0.70, 48],
+        ["rocks", 0.44, 0.50, 66],
+      ],
+    },
+    {
+      x: 790,
+      y: 2100,
+      w: 760,
+      h: 450,
+      biome: "forest",
+      elevation: "mid",
+      shape: "chunk-c",
+      setpiece: "fort",
+      setpieceAt: [0.66, 0.50],
+      labelAt: [0.08, 0.13],
+      path: [
+        [0.11, 0.65],
+        [0.26, 0.72],
+        [0.38, 0.56],
+        [0.28, 0.38],
+        [0.42, 0.25],
+        [0.57, 0.35],
+        [0.70, 0.25],
+        [0.84, 0.39],
+        [0.72, 0.58],
+        [0.86, 0.73],
+      ],
+      decorations: [
+        ["trees", 0.18, 0.28, 84],
+        ["trees", 0.60, 0.62, 92],
+        ["pipe", 0.48, 0.48, 38],
+        ["flower", 0.77, 0.18, 30],
+        ["bridge", 0.03, 0.76, 80],
+      ],
+    },
+    {
+      x: 760,
+      y: 1520,
+      w: 810,
+      h: 470,
+      biome: "cliff",
+      elevation: "high",
+      shape: "chunk-d",
+      setpiece: "waterfall",
+      setpieceAt: [0.63, 0.20],
+      labelAt: [0.08, 0.13],
+      path: [
+        [0.10, 0.70],
+        [0.21, 0.52],
+        [0.35, 0.58],
+        [0.48, 0.43],
+        [0.61, 0.53],
+        [0.76, 0.42],
+        [0.88, 0.56],
+        [0.73, 0.73],
+        [0.55, 0.75],
+        [0.41, 0.84],
+      ],
+      decorations: [
+        ["water", 0.55, 0.25, 112],
+        ["pipe", 0.77, 0.55, 42],
+        ["rocks", 0.34, 0.68, 76],
+        ["ladder", 0.23, 0.68, 54],
+        ["hill small", 0.14, 0.28, 46],
+      ],
+    },
+    {
+      x: 1600,
+      y: 1760,
+      w: 700,
+      h: 520,
+      biome: "forest",
+      elevation: "high",
+      shape: "chunk-e",
+      setpiece: "castle",
+      setpieceAt: [0.31, 0.69],
+      labelAt: [0.08, 0.11],
+      path: [
+        [0.16, 0.76],
+        [0.31, 0.67],
+        [0.47, 0.76],
+        [0.63, 0.68],
+        [0.79, 0.76],
+        [0.82, 0.54],
+        [0.65, 0.45],
+        [0.48, 0.50],
+        [0.34, 0.35],
+        [0.52, 0.23],
+      ],
+      decorations: [
+        ["forest", 0.14, 0.24, 150],
+        ["forest", 0.62, 0.24, 130],
+        ["trees", 0.55, 0.66, 92],
+        ["pipe", 0.78, 0.41, 38],
+        ["flower", 0.24, 0.55, 26],
+      ],
+    },
+    {
+      x: 1500,
+      y: 2810,
+      w: 840,
+      h: 470,
+      biome: "desert",
+      elevation: "mid",
+      shape: "chunk-f",
+      setpiece: "ruin",
+      setpieceAt: [0.64, 0.58],
+      labelAt: [0.08, 0.13],
+      path: [
+        [0.13, 0.36],
+        [0.28, 0.28],
+        [0.43, 0.36],
+        [0.58, 0.28],
+        [0.74, 0.39],
+        [0.87, 0.56],
+        [0.72, 0.72],
+        [0.53, 0.64],
+        [0.35, 0.75],
+        [0.19, 0.62],
+      ],
+      decorations: [
+        ["rocks", 0.20, 0.46, 110],
+        ["rocks", 0.55, 0.42, 94],
+        ["pipe", 0.13, 0.68, 40],
+        ["bones", 0.72, 0.65, 62],
+        ["ladder", 0.02, 0.45, 48],
+      ],
+    },
+    {
+      x: 1010,
+      y: 2500,
+      w: 520,
+      h: 300,
+      biome: "volcano",
+      elevation: "high",
+      shape: "chunk-g",
+      setpiece: "castle",
+      setpieceAt: [0.52, 0.28],
+      labelAt: [0.08, 0.17],
+      path: [
+        [0.15, 0.72],
+        [0.30, 0.62],
+        [0.44, 0.70],
+        [0.61, 0.60],
+        [0.79, 0.70],
+        [0.81, 0.42],
+        [0.63, 0.35],
+        [0.48, 0.48],
+        [0.32, 0.38],
+        [0.17, 0.48],
+      ],
+      decorations: [
+        ["rocks", 0.17, 0.18, 82],
+        ["water", 0.68, 0.18, 74],
+        ["bridge", 0.31, 0.80, 78],
+        ["pipe", 0.06, 0.62, 38],
+      ],
+    },
+    {
+      x: 1680,
+      y: 1110,
+      w: 700,
+      h: 480,
+      biome: "grass",
+      elevation: "high",
+      shape: "chunk-h",
+      setpiece: "tower",
+      setpieceAt: [0.74, 0.24],
+      labelAt: [0.08, 0.14],
+      path: [
+        [0.13, 0.74],
+        [0.27, 0.60],
+        [0.42, 0.70],
+        [0.56, 0.55],
+        [0.70, 0.64],
+        [0.84, 0.48],
+        [0.72, 0.31],
+        [0.54, 0.27],
+        [0.39, 0.37],
+        [0.21, 0.30],
+      ],
+      decorations: [
+        ["hill", 0.71, 0.12, 76],
+        ["hill small", 0.84, 0.18, 48],
+        ["forest", 0.13, 0.38, 128],
+        ["pipe", 0.45, 0.47, 40],
+        ["ladder", 0.89, 0.58, 58],
+      ],
+    },
+    {
+      x: 1090,
+      y: 820,
+      w: 620,
+      h: 360,
+      biome: "ice",
+      elevation: "mid",
+      shape: "chunk-i",
+      setpiece: "observatory",
+      setpieceAt: [0.68, 0.30],
+      labelAt: [0.08, 0.15],
+      path: [
+        [0.12, 0.72],
+        [0.24, 0.54],
+        [0.39, 0.63],
+        [0.53, 0.47],
+        [0.70, 0.57],
+        [0.86, 0.43],
+        [0.72, 0.26],
+        [0.55, 0.30],
+        [0.38, 0.24],
+        [0.22, 0.35],
+      ],
+      decorations: [
+        ["iceberg", 0.09, 0.20, 58],
+        ["iceberg", 0.77, 0.68, 64],
+        ["water", 0.42, 0.40, 86],
+        ["pipe", 0.18, 0.60, 36],
+      ],
+    },
+    {
+      x: 300,
+      y: 360,
+      w: 820,
+      h: 430,
+      biome: "sky",
+      elevation: "high",
+      shape: "star",
+      setpiece: "gate",
+      setpieceAt: [0.53, 0.45],
+      labelAt: [0.10, 0.16],
+      path: [
+        [0.11, 0.52],
+        [0.24, 0.33],
+        [0.38, 0.47],
+        [0.50, 0.22],
+        [0.62, 0.47],
+        [0.78, 0.33],
+        [0.90, 0.52],
+        [0.71, 0.64],
+        [0.59, 0.83],
+        [0.50, 0.61],
+      ],
+      decorations: [
+        ["cloud", 0.05, -0.08, 108],
+        ["cloud", 0.78, -0.10, 118],
+        ["flower", 0.24, 0.42, 30],
+        ["flower", 0.75, 0.43, 30],
+        ["water", 0.46, 0.42, 72],
+      ],
+    },
+  ];
+  return templates[worldIndex % templates.length];
+}
+
+function clampCampaignPointToWorld(point, worldIndex) {
+  const template = campaignWorldTemplate(worldIndex);
+  const rowOffset = Math.floor(worldIndex / 10) * 420;
+  const margin = 54;
+  point.x = clamp(point.x, template.x + margin, template.x + template.w - margin);
+  point.y = clamp(point.y, template.y + rowOffset + margin, template.y + rowOffset + template.h - margin);
+}
+
+function relaxCampaignLevelPositions(levels, worlds) {
+  const minGap = 86;
+  for (let pass = 0; pass < 4; pass++) {
+    for (let worldIndex = 0; worldIndex < worlds; worldIndex++) {
+      const worldLevels = levels.filter((level) => level.worldIndex === worldIndex);
+      for (let i = 0; i < worldLevels.length; i++) {
+        for (let j = i + 1; j < worldLevels.length; j++) {
+          const a = worldLevels[i];
+          const b = worldLevels[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const distance = Math.hypot(dx, dy) || 1;
+          if (distance >= minGap) continue;
+          const push = (minGap - distance) / 2;
+          const ux = dx / distance;
+          const uy = dy / distance;
+          a.x -= ux * push;
+          a.y -= uy * push;
+          b.x += ux * push;
+          b.y += uy * push;
+          clampCampaignPointToWorld(a, worldIndex);
+          clampCampaignPointToWorld(b, worldIndex);
+        }
+      }
+    }
+  }
+}
+
+function campaignChestCandidateScore(candidate, nearbyLevels, existingChests) {
+  const nearestLevel = nearbyLevels.reduce((nearest, level) => Math.min(nearest, Math.hypot(candidate.x - level.x, candidate.y - level.y)), Infinity);
+  const nearestChest = existingChests.reduce((nearest, chest) => Math.min(nearest, Math.hypot(candidate.x - chest.x, candidate.y - chest.y)), Infinity);
+  const levelScore = Math.min(nearestLevel, 150);
+  const chestScore = Math.min(nearestChest, 170);
+  return levelScore + chestScore * 0.8;
+}
+
+function placeCampaignChest({ from, to, milestone, index, levels, existingChests }) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const ux = dx / distance;
+  const uy = dy / distance;
+  const nx = -uy;
+  const ny = ux;
+  const sameWorld = from.worldIndex === to.worldIndex;
+  const nearbyLevels = levels.filter(
+    (level) => Math.abs(level.level - milestone) <= 5 || level.worldIndex === from.worldIndex || level.worldIndex === to.worldIndex
+  );
+  const signs = index % 2 === 0 ? [1, -1] : [-1, 1];
+  const offsets = sameWorld ? [82, 104, 62, 126] : [64, 86, 44, 108];
+  const alongs = [0.5, 0.42, 0.58, 0.34, 0.66];
+  let best = null;
+
+  for (const sign of signs) {
+    for (const offset of offsets) {
+      for (const along of alongs) {
+        const candidate = {
+          x: from.x + dx * along + nx * offset * sign,
+          y: from.y + dy * along + ny * offset * sign,
+        };
+        if (sameWorld) clampCampaignPointToWorld(candidate, from.worldIndex);
+        const score = campaignChestCandidateScore(candidate, nearbyLevels, existingChests);
+        if (!best || score > best.score) best = { ...candidate, score };
+      }
+    }
+  }
+
+  return {
+    chestIndex: index,
+    milestone,
+    worldIndex: from.worldIndex,
+    x: best?.x ?? (from.x + to.x) / 2,
+    y: best?.y ?? (from.y + to.y) / 2,
+  };
+}
+
+function buildCampaignLayout(plan) {
+  const totalLevels = CAMPAIGN_CONFIG.totalLevels;
+  const worlds = Math.ceil(totalLevels / CAMPAIGN_CONFIG.levelsPerWorld);
+  const sceneWidth = 2520;
+  const sceneHeight = Math.max(3460, worlds > 10 ? 3460 + (worlds - 10) * 420 : 3460);
+  const levels = [];
+
+  for (let level = 1; level <= totalLevels; level++) {
+    const worldIndex = Math.floor((level - 1) / CAMPAIGN_CONFIG.levelsPerWorld);
+    const inWorldIndex = (level - 1) % CAMPAIGN_CONFIG.levelsPerWorld;
+    const template = campaignWorldTemplate(worldIndex);
+    const rowOffset = Math.floor(worldIndex / 10) * 420;
+    const pathPoint = template.path[inWorldIndex] || template.path[template.path.length - 1];
+    const x = template.x + pathPoint[0] * template.w;
+    const y = template.y + rowOffset + pathPoint[1] * template.h;
+    levels.push({
+      level,
+      worldIndex,
+      biome: template.biome || CAMPAIGN_BIOMES[worldIndex % CAMPAIGN_BIOMES.length],
+      x,
+      y,
+    });
+  }
+  relaxCampaignLevelPositions(levels, worlds);
+
+  const chests = [];
+  plan.chestLevels.forEach((milestone, index) => {
+    const from = levels[Math.max(0, milestone - 1)] || levels[levels.length - 1];
+    const to = levels[Math.min(levels.length - 1, milestone)] || from;
+    chests.push(placeCampaignChest({ from, to, milestone, index, levels, existingChests: chests }));
+  });
+
+  const islands = [];
+  const setpieces = [];
+  const decorations = [];
+  const worldLabels = [];
+
+  for (let worldIndex = 0; worldIndex < worlds; worldIndex++) {
+    const template = campaignWorldTemplate(worldIndex);
+    const rowOffset = Math.floor(worldIndex / 10) * 420;
+    const worldLevels = levels.filter((l) => l.worldIndex === worldIndex);
+    if (!worldLevels.length) continue;
+    islands.push({
+      x: template.x,
+      y: template.y + rowOffset,
+      w: template.w,
+      h: template.h,
+      biome: worldLevels[0].biome,
+      elevation: template.elevation || (worldIndex % 3 === 0 ? "low" : worldIndex % 3 === 1 ? "mid" : "high"),
+      shape: template.shape || "chunk-a",
+    });
+
+    setpieces.push({
+      type: template.setpiece || "castle",
+      biome: worldLevels[0].biome,
+      x: template.x + (template.setpieceAt?.[0] ?? 0.72) * template.w,
+      y: template.y + rowOffset + (template.setpieceAt?.[1] ?? 0.36) * template.h,
+    });
+
+    if (worldIndex > 0) {
+      const start = worldLevels[0];
+      setpieces.push({
+        type: "gate",
+        biome: worldLevels[0].biome,
+        x: start.x - 26,
+        y: start.y + 26,
+      });
+    }
+
+    for (const decoration of template.decorations || []) {
+      const [type, rx, ry, size] = decoration;
+      decorations.push({
+        type,
+        biome: worldLevels[0].biome,
+        size,
+        x: template.x + rx * template.w,
+        y: template.y + rowOffset + ry * template.h,
+      });
+    }
+
+    worldLabels.push({
+      x: template.x + (template.labelAt?.[0] ?? 0.08) * template.w,
+      y: template.y + rowOffset + (template.labelAt?.[1] ?? 0.12) * template.h,
+      text: `World ${worldIndex + 1}`,
+      biome: worldLevels[0].biome,
+    });
+  }
+
+  return {
+    key: `${totalLevels}:${plan.chestLevels.join(",")}`,
+    width: sceneWidth,
+    height: sceneHeight,
+    levels,
+    chests,
+    islands,
+    setpieces,
+    decorations,
+    worldLabels,
+  };
+}
+
+function ensureCampaignLayout(plan) {
+  const nextKey = `${CAMPAIGN_CONFIG.totalLevels}:${plan.chestLevels.join(",")}`;
+  if (!state.campaignLayout || state.campaignLayout.key !== nextKey) {
+    state.campaignLayout = buildCampaignLayout(plan);
+    state.campaignPan = null;
+    state.campaignPanLayoutKey = "";
+  }
+  return state.campaignLayout;
+}
+
+function campaignPanBounds(layout) {
+  const viewportW = Math.max(1, els.campaignMap?.clientWidth || 1);
+  const viewportH = Math.max(1, els.campaignMap?.clientHeight || 1);
+  return {
+    minX: Math.min(0, viewportW - layout.width - 40),
+    maxX: 20,
+    minY: Math.min(0, viewportH - layout.height - 40),
+    maxY: 20,
+    viewportW,
+    viewportH,
+  };
+}
+
+function applyCampaignPan() {
+  if (!state.campaignPan || !els.campaignMap) return;
+  const scene = els.campaignMap.querySelector(".overworldScene");
+  if (!scene) return;
+  scene.style.transform = `translate(${Math.round(state.campaignPan.x)}px, ${Math.round(state.campaignPan.y)}px)`;
+}
+
+function ensureCampaignPan(layout) {
+  if (!els.campaignMap) return;
+  const bounds = campaignPanBounds(layout);
+  const startLevel = layout.levels[0] || { x: 120, y: layout.height - 120 };
+  const defaultX = 80 - startLevel.x;
+  const defaultY = bounds.viewportH - 150 - startLevel.y;
+  if (!state.campaignPan || state.campaignPanLayoutKey !== layout.key) {
+    state.campaignPan = {
+      x: clamp(defaultX, bounds.minX, bounds.maxX),
+      y: clamp(defaultY, bounds.minY, bounds.maxY),
+      dragging: false,
+      pointerId: null,
+      startClientX: 0,
+      startClientY: 0,
+      startPanX: 0,
+      startPanY: 0,
+      moved: false,
+    };
+    state.campaignPanLayoutKey = layout.key;
+  } else {
+    state.campaignPan.x = clamp(state.campaignPan.x, bounds.minX, bounds.maxX);
+    state.campaignPan.y = clamp(state.campaignPan.y, bounds.minY, bounds.maxY);
+  }
+  applyCampaignPan();
+}
+
+function campaignClickAllowed() {
+  return Date.now() >= (state.campaignSuppressClickUntil || 0);
+}
+
+function bindCampaignPanHandlers() {
+  if (!els.campaignMap || state.campaignPanBound) return;
+  const map = els.campaignMap;
+  map.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    if (!state.campaignPan || !state.campaignLayout) return;
+    state.campaignPan.dragging = true;
+    state.campaignPan.pointerId = ev.pointerId;
+    state.campaignPan.startClientX = ev.clientX;
+    state.campaignPan.startClientY = ev.clientY;
+    state.campaignPan.startPanX = state.campaignPan.x;
+    state.campaignPan.startPanY = state.campaignPan.y;
+    state.campaignPan.moved = false;
+    map.classList.add("is-grabbing");
+    map.setPointerCapture?.(ev.pointerId);
+  });
+  map.addEventListener("pointermove", (ev) => {
+    if (!state.campaignPan?.dragging || state.campaignPan.pointerId !== ev.pointerId) return;
+    const bounds = campaignPanBounds(state.campaignLayout);
+    const dx = ev.clientX - state.campaignPan.startClientX;
+    const dy = ev.clientY - state.campaignPan.startClientY;
+    state.campaignPan.moved = state.campaignPan.moved || Math.abs(dx) + Math.abs(dy) > 6;
+    state.campaignPan.x = clamp(state.campaignPan.startPanX + dx, bounds.minX, bounds.maxX);
+    state.campaignPan.y = clamp(state.campaignPan.startPanY + dy, bounds.minY, bounds.maxY);
+    applyCampaignPan();
+  });
+  const endDrag = (ev) => {
+    if (!state.campaignPan?.dragging) return;
+    if (state.campaignPan.pointerId != null && ev && state.campaignPan.pointerId !== ev.pointerId) return;
+    const moved = state.campaignPan.moved;
+    state.campaignPan.dragging = false;
+    state.campaignPan.pointerId = null;
+    state.campaignPan.moved = false;
+    map.classList.remove("is-grabbing");
+    if (moved) state.campaignSuppressClickUntil = Date.now() + 140;
+  };
+  map.addEventListener("pointerup", endDrag);
+  map.addEventListener("pointercancel", endDrag);
+  map.addEventListener("pointerleave", endDrag);
+  state.campaignPanBound = true;
+}
+
+function campaignRulePoolForSingleplayer() {
+  const catalog = state.campaignRuleCatalog || [];
+  const plan = buildCampaignRulePlan(catalog);
+  if (!state.campaign) loadCampaignProgress(plan);
+  const unlocked = uniqueStrings(state.campaign?.unlockedRuleIds || []).filter((id) => plan.allRuleIds.includes(id));
+  return unlocked.length ? unlocked : plan.basicRules;
+}
+
+async function openCampaignChest(chestIndex, { auto = false } = {}) {
+  const catalog = state.campaignRuleCatalog || [];
+  const plan = buildCampaignRulePlan(catalog);
+  if (!state.campaign) loadCampaignProgress(plan);
+  const chestLevel = plan.chestLevels[chestIndex];
+  if (chestLevel == null) return;
+  if (state.campaign.highestUnlockedLevel <= chestLevel) return;
+  if (state.campaign.openedChests.includes(chestIndex)) return;
+  const res = await fetch("/api/me/campaign", {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "openChest", chestIndex }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to open chest.");
+  state.campaign = normalizeCampaignProgress(json.campaign, plan);
+  if (json.user) {
+    state.account = json.user;
+    saveAccountSession();
+    renderAccountUI();
+  } else {
+    saveCampaignProgress();
+  }
+
+  if (els.campaignNotice) {
+    const rewards = Array.isArray(json.rewards) ? json.rewards : [];
+    if (rewards.length) {
+      const rewardNames = rewards.slice(0, 3).map((id) => ruleNameById(id));
+      const suffix = rewards.length > 3 ? ` +${rewards.length - 3} more` : "";
+      els.campaignNotice.textContent = `${auto ? "Auto-opened chest" : "Opened chest"}: ${rewardNames.join(", ")}${suffix}`;
+    } else {
+      els.campaignNotice.textContent = `${auto ? "Auto-opened chest" : "Opened chest"}: bonus chest (no new rules).`;
+    }
+  }
+}
+
+function renderCampaignMap() {
+  if (!els.campaignMap || !els.campaignSummary || !els.campaignNotice || !state.campaignRuleCatalog) return;
+  const plan = buildCampaignRulePlan(state.campaignRuleCatalog);
+  const layout = ensureCampaignLayout(plan);
+  if (!state.campaign) loadCampaignProgress(plan);
+  const completed = new Set(state.campaign.completedLevels || []);
+  const openedChests = new Set(state.campaign.openedChests || []);
+  const highestUnlocked = state.campaign.highestUnlockedLevel || 1;
+  const unlockedRuleCount = uniqueStrings(state.campaign.unlockedRuleIds || []).length;
+  const totalRuleCount = plan.allRuleIds.length;
+  els.campaignSummary.textContent = `Level ${highestUnlocked}/${CAMPAIGN_CONFIG.totalLevels} unlocked | ${unlockedRuleCount}/${totalRuleCount} rules unlocked`;
+  els.campaignNotice.textContent = els.campaignNotice.textContent || "Open chest nodes when they become available.";
+  els.campaignMap.innerHTML = "";
+
+  const scene = document.createElement("div");
+  scene.className = "overworldScene";
+  scene.style.width = `${layout.width}px`;
+  scene.style.height = `${layout.height}px`;
+  els.campaignMap.appendChild(scene);
+
+  for (const island of layout.islands) {
+    const piece = document.createElement("div");
+    piece.className = `mapIsland ${island.biome} ${island.elevation} ${island.shape || ""}`.trim();
+    piece.style.left = `${island.x}px`;
+    piece.style.top = `${island.y}px`;
+    piece.style.width = `${island.w}px`;
+    piece.style.height = `${island.h}px`;
+    scene.appendChild(piece);
+  }
+
+  for (const label of layout.worldLabels || []) {
+    const worldLabel = document.createElement("div");
+    worldLabel.className = `mapWorldLabel ${label.biome}`;
+    worldLabel.style.left = `${label.x}px`;
+    worldLabel.style.top = `${label.y}px`;
+    worldLabel.textContent = label.text;
+    scene.appendChild(worldLabel);
+  }
+
+  for (const setpiece of layout.setpieces || []) {
+    const landmark = document.createElement("div");
+    landmark.className = `mapSetpiece ${setpiece.type} ${setpiece.biome}`;
+    landmark.style.left = `${setpiece.x}px`;
+    landmark.style.top = `${setpiece.y}px`;
+    scene.appendChild(landmark);
+  }
+
+  for (const decoration of layout.decorations || []) {
+    const prop = document.createElement("div");
+    prop.className = `mapDecor ${decoration.type} ${decoration.biome}`.trim();
+    prop.style.left = `${decoration.x}px`;
+    prop.style.top = `${decoration.y}px`;
+    if (decoration.size) prop.style.setProperty("--s", `${decoration.size}px`);
+    scene.appendChild(prop);
+  }
+
+  const routeStops = [];
+  for (const levelPoint of layout.levels) {
+    routeStops.push({ kind: "level", level: levelPoint.level, worldIndex: levelPoint.worldIndex, x: levelPoint.x, y: levelPoint.y });
+    const chestIndex = plan.chestLevels.indexOf(levelPoint.level);
+    if (chestIndex >= 0) {
+      const chest = layout.chests[chestIndex];
+      if (chest) routeStops.push({ kind: "chest", chestIndex, worldIndex: chest.worldIndex, x: chest.x, y: chest.y });
+    }
+  }
+
+  const routeSvg = createSvg("svg");
+  routeSvg.setAttribute("class", "overworldRoutes");
+  routeSvg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+  routeSvg.setAttribute("preserveAspectRatio", "none");
+  scene.appendChild(routeSvg);
+
+  for (let i = 0; i < routeStops.length - 1; i++) {
+    const from = routeStops[i];
+    const to = routeStops[i + 1];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const curve = Math.min(88, distance * 0.16) * (i % 2 === 0 ? 1 : -1);
+    const cx = (from.x + to.x) / 2 + (-dy / distance) * curve;
+    const cy = (from.y + to.y) / 2 + (dx / distance) * curve;
+    const path = createSvg("path");
+    path.setAttribute("d", `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`);
+    const className = from.worldIndex !== to.worldIndex ? "routeLine routeLineInterworld" : "routeLine";
+    path.setAttribute("class", className);
+    routeSvg.appendChild(path);
+  }
+
+  for (const stop of routeStops) {
+    const point = createSvg("circle");
+    point.setAttribute("cx", String(stop.x));
+    point.setAttribute("cy", String(stop.y));
+    point.setAttribute("r", stop.kind === "chest" ? "6" : "4");
+    point.setAttribute("class", `routeDot ${stop.kind === "chest" ? "chestDot" : ""}`.trim());
+    routeSvg.appendChild(point);
+  }
+
+  for (const levelData of layout.levels) {
+    const level = levelData.level;
+    const isCompleted = completed.has(level);
+    const isUnlocked = level <= highestUnlocked;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `worldNode${isCompleted ? " completed" : ""}${isUnlocked && !isCompleted ? " current" : ""}${!isUnlocked ? " locked" : ""}`;
+    btn.style.left = `${levelData.x}px`;
+    btn.style.top = `${levelData.y}px`;
+    btn.disabled = !isUnlocked;
+    btn.innerHTML = `<span class="worldDot"></span><span class="worldLabel">${level}</span>`;
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    btn.addEventListener("click", () => {
+      if (!campaignClickAllowed()) return;
+      startCampaignLevel(level);
+    });
+    scene.appendChild(btn);
+  }
+
+  for (let chestIndex = 0; chestIndex < plan.chestLevels.length; chestIndex++) {
+    const pos = layout.chests[chestIndex];
+    if (!pos) continue;
+    const milestone = plan.chestLevels[chestIndex];
+    const chestUnlocked = highestUnlocked > milestone;
+    const chestOpened = openedChests.has(chestIndex);
+    const chest = document.createElement("button");
+    chest.type = "button";
+    chest.className = `worldChest${chestOpened ? " opened" : chestUnlocked ? " ready" : " locked"}`;
+    chest.style.left = `${pos.x}px`;
+    chest.style.top = `${pos.y}px`;
+    chest.disabled = !chestUnlocked || chestOpened;
+    chest.innerHTML = `<span class="chestIcon"></span><span class="worldLabel">${chestIndex + 1}</span>`;
+    chest.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    chest.addEventListener("click", async () => {
+      if (!campaignClickAllowed()) return;
+      try {
+        await openCampaignChest(chestIndex);
+        renderCampaignMap();
+      } catch (err) {
+        if (els.campaignNotice) els.campaignNotice.textContent = err.message || "Failed to open chest.";
+      }
+    });
+    scene.appendChild(chest);
+  }
+
+  ensureCampaignPan(layout);
+  bindCampaignPanHandlers();
+  applyCampaignPan();
+}
+
+async function openCampaignMap() {
+  if (!ensureSignedIn()) return;
+  try {
+    await refreshAccount();
+    const catalog = await ensureCampaignRuleCatalog();
+    const plan = buildCampaignRulePlan(catalog);
+    loadCampaignProgress(plan);
+    state.view = "campaign";
+    syncUI();
+    renderCampaignMap();
+  } catch (err) {
+    logLine(`<strong>Campaign</strong>: ${escapeHtml(err.message || "Failed to open campaign map.")}`);
+  }
+}
+
+function closeCampaignMap() {
+  state.view = "lobby";
+  if (els.campaignNotice) els.campaignNotice.textContent = "";
+  syncUI();
+}
+
+async function resetCampaignProgress() {
+  if (!confirm("Reset singleplayer campaign progress?")) return;
+  try {
+    const catalog = await ensureCampaignRuleCatalog();
+    const plan = buildCampaignRulePlan(catalog);
+    const res = await fetch("/api/me/campaign", {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reset" }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to reset campaign.");
+    state.campaign = normalizeCampaignProgress(json.campaign, plan);
+    if (json.user) {
+      state.account = json.user;
+      saveAccountSession();
+      renderAccountUI();
+    } else {
+      saveCampaignProgress();
+    }
+    if (els.campaignNotice) els.campaignNotice.textContent = "Campaign progress reset.";
+    renderCampaignMap();
+    if (els.profileModal && !els.profileModal.hidden) renderProfile();
+  } catch (err) {
+    logLine(`<strong>Campaign</strong>: ${escapeHtml(err.message || "Failed to reset campaign.")}`);
   }
 }
 
@@ -607,7 +1585,7 @@ function n(value) {
 }
 
 function coinsText(user) {
-  return user?.isAdmin ? "âˆž" : n(user?.stats?.coins);
+  return user?.isAdmin ? "\u221E" : n(user?.stats?.coins);
 }
 
 function msDuration(ms) {
@@ -752,6 +1730,15 @@ function renderHistoryTab(user) {
 }
 
 function renderRulesTab(user) {
+  const mode = state.profileRulesTab === "singleplayer" ? "singleplayer" : "multiplayer";
+  const subtabs = `
+    <div class="profileSubtabs" role="tablist" aria-label="Rule collection mode">
+      <button class="profileRulesTabBtn ${mode === "multiplayer" ? "active" : ""}" data-rules-tab="multiplayer" type="button">Multiplayer</button>
+      <button class="profileRulesTabBtn ${mode === "singleplayer" ? "active" : ""}" data-rules-tab="singleplayer" type="button">Singleplayer</button>
+    </div>
+  `;
+  if (mode === "singleplayer") return renderSingleplayerRulesTab(user, subtabs);
+
   const rules = user.ruleCollection || [];
   return `
     <section class="profileSection wide">
@@ -759,6 +1746,7 @@ function renderRulesTab(user) {
         <h3>Rule Collection</h3>
         <button id="openRuleAppendixBtn" type="button">View rule appendix</button>
       </div>
+      ${subtabs}
       <div class="profileStats">
         ${statTile("rules discovered", n(rules.length))}
         ${statTile("rare cards", n(rules.filter((r) => r.rare).length))}
@@ -779,6 +1767,54 @@ function renderRulesTab(user) {
                 )
                 .join("")
             : `<div class="emptyServers">Pick rule cards in matches to discover them here.</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderSingleplayerRulesTab(user, subtabs) {
+  if (!Array.isArray(state.campaignRuleCatalog) || !state.campaignRuleCatalog.length) {
+    ensureCampaignRuleCatalog()
+      .then(() => {
+        if (els.profileModal && !els.profileModal.hidden && state.profileTab === "rules") renderProfile();
+      })
+      .catch(() => {});
+  }
+
+  const catalog = state.campaignRuleCatalog || [];
+  const plan = buildCampaignRulePlan(catalog);
+  const campaign = normalizeCampaignProgress(user.campaign, plan);
+  const unlocked = new Set(campaign.unlockedRuleIds || []);
+  const unlockedRules = catalog.filter((rule) => unlocked.has(rule.id));
+
+  return `
+    <section class="profileSection wide">
+      <div class="shopHeader">
+        <h3>Rule Collection</h3>
+        <button id="openRuleAppendixBtn" type="button">View rule appendix</button>
+      </div>
+      ${subtabs}
+      <div class="profileStats">
+        ${statTile("campaign level", `${n(campaign.highestUnlockedLevel)}/${n(CAMPAIGN_CONFIG.totalLevels)}`)}
+        ${statTile("rules unlocked", `${n(unlockedRules.length)}/${n(plan.allRuleIds.length)}`)}
+        ${statTile("chests opened", `${n((campaign.openedChests || []).length)}/${n(plan.chestLevels.length)}`)}
+      </div>
+      <div class="ruleMasteryGrid">
+        ${
+          catalog.length
+            ? unlockedRules
+                .map(
+                  (r) => `
+                    <div class="ruleMasteryCard">
+                      <strong>${escapeHtml(r.name)}</strong>
+                      <span>${escapeHtml(r.typeLabel || "Rule")}</span>
+                      <span>${escapeHtml(r.description || "")}</span>
+                    </div>
+                  `
+                )
+                .join("") || `<div class="emptyServers">No singleplayer rules unlocked yet.</div>`
+            : `<div class="emptyServers">Loading singleplayer rules...</div>`
         }
       </div>
     </section>
@@ -1093,6 +2129,13 @@ function renderSettingsTab(user) {
       <div class="modalActions"><button id="changePasswordBtn" type="button">Change password</button></div>
     </section>
     <section class="profileSection wide dangerZone">
+      <h3>Singleplayer Campaign</h3>
+      <div class="profileList">
+        <div><span>Campaign progress is stored on this browser.</span><strong>Local save</strong></div>
+      </div>
+      <div class="modalActions"><button id="campaignResetProfileBtn" class="dangerBtn" type="button">Reset campaign progress</button></div>
+    </section>
+    <section class="profileSection wide dangerZone">
       <h3>Account</h3>
       <div class="modalActions">
         <button id="logoutBtn" type="button">Log out</button>
@@ -1401,6 +2444,7 @@ async function deleteAccount() {
 function updateBodyState() {
   document.body.classList.toggle("is-connected", state.connected);
   document.body.classList.toggle("is-in-game", !!state.lobby);
+  document.body.classList.toggle("is-campaign-view", !state.lobby && state.view === "campaign");
   if (!state.lobby) {
     document.body.classList.remove("is-choosing");
     document.body.classList.remove("is-debug-choice");
@@ -1409,6 +2453,7 @@ function updateBodyState() {
 
 loadAccountSession();
 loadSession();
+if (state.lobby) state.view = "game";
 renderAccountUI();
 refreshAccount();
 
@@ -3618,7 +4663,7 @@ function renderWager() {
       const isSelected = selectedSet.has(item.sq);
       btn.className = `wagerPiece${isSelected ? " selected" : ""}`;
       const glyph = PIECE_GLYPH_MONO[item.p.type] || "?";
-      btn.innerHTML = `<div class="wagerGlyph">${glyph}</div><div class="wagerMeta">${escapeHtml(item.p.type.toUpperCase())} Â· ${escapeHtml(sqToAlg(item.sq))}</div>`;
+      btn.innerHTML = `<div class="wagerGlyph">${glyph}</div><div class="wagerMeta">${escapeHtml(item.p.type.toUpperCase())} &middot; ${escapeHtml(sqToAlg(item.sq))}</div>`;
       if (!interactive) btn.style.opacity = "0.78";
       if (interactive) {
         btn.addEventListener("click", () => {
@@ -3753,7 +4798,7 @@ async function openRulebook() {
   els.rulebookModal.hidden = false;
 
   if (!state.cachedRulebook) {
-    els.rulebookCards.innerHTML = `<div class="modalStatus">Loadingâ€¦</div>`;
+    els.rulebookCards.innerHTML = `<div class="modalStatus">Loading...</div>`;
     try {
       const res = await fetch("/api/rules", { cache: "no-store" });
       const json = await res.json();
@@ -3811,14 +4856,48 @@ function createLobby(visibility) {
   });
 }
 
-function createSingleplayer() {
+function createSingleplayer({ campaignLevel = null, rulePoolIds = null } = {}) {
   if (!ensureSignedIn()) return;
-  socket.emit("lobby:singleplayer", { authToken: state.authToken }, (res) => {
+  socket.emit("lobby:singleplayer", { authToken: state.authToken, campaignLevel, rulePoolIds }, (res) => {
     if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "singleplayer failed")}`);
+    state.activeCampaignLevel = Number.isFinite(Number(campaignLevel)) ? Math.floor(Number(campaignLevel)) : null;
     enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
     refreshAccount();
     els.code.value = "";
     logLine(`<strong>Lobby</strong>: Started singleplayer game against Chaos Bot.`);
+  });
+}
+
+async function startCampaignLevel(level) {
+  if (!ensureSignedIn()) return;
+  try {
+    const catalog = await ensureCampaignRuleCatalog();
+    const plan = buildCampaignRulePlan(catalog);
+    if (!state.campaign) loadCampaignProgress(plan);
+    if (level > (state.campaign.highestUnlockedLevel || 1)) return;
+    const rulePoolIds = campaignRulePoolForSingleplayer();
+    if (els.campaignNotice) els.campaignNotice.textContent = "";
+    createSingleplayer({ campaignLevel: level, rulePoolIds });
+  } catch (err) {
+    logLine(`<strong>Campaign</strong>: ${escapeHtml(err.message || "Failed to start level.")}`);
+  }
+}
+
+function returnToCampaignMap(reason) {
+  if (reason) logLine(`<strong>Campaign</strong>: ${escapeHtml(reason)}`);
+  if (!state.lobby || !state.playerId) {
+    state.view = "campaign";
+    syncUI();
+    renderCampaignMap();
+    return;
+  }
+  const code = state.lobby;
+  const playerId = state.playerId;
+  socket.emit("lobby:leave", { code, playerId }, () => {
+    resetToLobby();
+    state.view = "campaign";
+    syncUI();
+    renderCampaignMap();
   });
 }
 
@@ -3928,8 +5007,10 @@ function applyGameCosmetics() {
 function syncUI() {
   const s = state.serverState;
   const connected = !!state.lobby;
+  const showCampaign = !connected && state.view === "campaign";
   updateBodyState();
-  els.lobbyPanel.hidden = connected;
+  els.lobbyPanel.hidden = connected || showCampaign;
+  if (els.campaignPanel) els.campaignPanel.hidden = !showCampaign;
   els.gamePanel.hidden = !connected;
   if (!connected) return;
 
@@ -4083,6 +5164,51 @@ function setConnectedUI() {
   updateBodyState();
 }
 
+function handleCampaignGameResult(s) {
+  if (!s?.resultInfo) return;
+  if (s.mode !== "singleplayer") return;
+  if (s.campaign) {
+    state.campaign = Array.isArray(state.campaignRuleCatalog) && state.campaignRuleCatalog.length
+      ? normalizeCampaignProgress(s.campaign, buildCampaignRulePlan(state.campaignRuleCatalog))
+      : s.campaign;
+    saveCampaignProgress();
+  }
+  const winner = s.resultInfo.winner;
+  const loser = s.resultInfo.loser;
+  if (!winner || !loser) return;
+
+  const resultKey = `${s.roomCode || ""}:${s.rematchId || 0}:${winner}:${loser}:${s.resultInfo.reason || ""}`;
+  if (!Array.isArray(state.campaignRuleCatalog) || !state.campaignRuleCatalog.length) {
+    ensureCampaignRuleCatalog()
+      .then(() => handleCampaignGameResult(s))
+      .catch(() => {});
+    return;
+  }
+  if (state.lastCampaignResultKey === resultKey) return;
+  state.lastCampaignResultKey = resultKey;
+  const plan = buildCampaignRulePlan(state.campaignRuleCatalog);
+  if (!state.campaign) loadCampaignProgress(plan);
+
+  const level = Number.isFinite(Number(s.campaignLevel))
+    ? Math.floor(Number(s.campaignLevel))
+    : Number.isFinite(Number(state.activeCampaignLevel))
+      ? Math.floor(Number(state.activeCampaignLevel))
+      : null;
+  if (!level || level < 1) return;
+
+  const youWon = winner === state.color;
+  const message = youWon ? `Level ${level} cleared. Returning to world map...` : `Level ${level} failed. Returning to world map...`;
+  setTimeout(async () => {
+    try {
+      await refreshAccount();
+      loadCampaignProgress(plan);
+    } catch {
+      // The server is the source of truth; keep the current in-memory campaign if refresh fails.
+    }
+    returnToCampaignMap(message);
+  }, 1400);
+}
+
 socket.on("connect", () => {
   state.connected = true;
   setConnectedUI();
@@ -4092,6 +5218,7 @@ socket.on("connect", () => {
     socket.emit("lobby:resume", { code: state.lobby, playerId: state.playerId }, (res) => {
       if (!res?.ok) {
         logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "resume failed")}`);
+        state.view = "lobby";
         state.lobby = null;
         state.playerId = null;
         state.color = null;
@@ -4150,6 +5277,7 @@ socket.on("game:state", (s) => {
       refreshAccount();
     }
   }
+  handleCampaignGameResult(s);
   handleEffects();
   syncUI();
 });
@@ -4186,12 +5314,18 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (target?.id === "logoutBtn") logout();
   if (target?.id === "saveProfileBtn") saveProfileSettings();
   if (target?.id === "changePasswordBtn") changePassword();
+  if (target?.id === "campaignResetProfileBtn") resetCampaignProgress();
   if (target?.id === "addFriendBtn") addFriend();
   if (target?.id === "openRuleAppendixBtn") openRulebook();
   if (target?.id === "deleteAccountBtn") deleteAccount();
   if (target?.id === "adminLoadFlagsBtn") adminLoadFlags();
   if (target?.id === "adminRefreshUsersBtn") adminRefreshUsers();
   if (target?.id === "adminSaveUserBtn") adminSaveUser();
+  const rulesTabBtn = target?.closest?.(".profileRulesTabBtn");
+  if (rulesTabBtn) {
+    state.profileRulesTab = rulesTabBtn.dataset.rulesTab === "singleplayer" ? "singleplayer" : "multiplayer";
+    renderProfile();
+  }
   const buyBtn = target?.closest?.(".buyCosmeticBtn");
   if (buyBtn) buyCosmetic(buyBtn.dataset.buyGroup, buyBtn.dataset.buyName);
 });
@@ -4244,8 +5378,9 @@ els.createBtn.addEventListener("click", () => {
 });
 
 els.singleplayerBtn?.addEventListener("click", () => {
-  createSingleplayer();
+  openCampaignMap();
 });
+els.campaignBackBtn?.addEventListener("click", () => closeCampaignMap());
 
 els.createPublicBtn?.addEventListener("click", () => createLobby("public"));
 els.createPrivateBtn?.addEventListener("click", () => createLobby("private"));
