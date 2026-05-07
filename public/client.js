@@ -202,6 +202,9 @@ const CAMPAIGN_CONFIG = {
   ],
   excludedFromCampaignPool: [],
 };
+const CAMPAIGN_MAP_MIN_ZOOM = 0.65;
+const CAMPAIGN_MAP_MAX_ZOOM = 1.9;
+const CAMPAIGN_MAP_ZOOM_STEP = 0.0015;
 const CAMPAIGN_BIOMES = [
   "grass",
   "forest",
@@ -1029,12 +1032,15 @@ function ensureCampaignLayout(plan) {
 }
 
 function campaignPanBounds(layout) {
+  const zoom = clamp(Number(state.campaignPan?.zoom) || 1, CAMPAIGN_MAP_MIN_ZOOM, CAMPAIGN_MAP_MAX_ZOOM);
+  const scaledWidth = layout.width * zoom;
+  const scaledHeight = layout.height * zoom;
   const viewportW = Math.max(1, els.campaignMap?.clientWidth || 1);
   const viewportH = Math.max(1, els.campaignMap?.clientHeight || 1);
   return {
-    minX: Math.min(0, viewportW - layout.width - 40),
+    minX: Math.min(0, viewportW - scaledWidth - 40),
     maxX: 20,
-    minY: Math.min(0, viewportH - layout.height - 40),
+    minY: Math.min(0, viewportH - scaledHeight - 40),
     maxY: 20,
     viewportW,
     viewportH,
@@ -1045,7 +1051,8 @@ function applyCampaignPan() {
   if (!state.campaignPan || !els.campaignMap) return;
   const scene = els.campaignMap.querySelector(".overworldScene");
   if (!scene) return;
-  scene.style.transform = `translate(${Math.round(state.campaignPan.x)}px, ${Math.round(state.campaignPan.y)}px)`;
+  const zoom = clamp(Number(state.campaignPan.zoom) || 1, CAMPAIGN_MAP_MIN_ZOOM, CAMPAIGN_MAP_MAX_ZOOM);
+  scene.style.transform = `translate(${Math.round(state.campaignPan.x)}px, ${Math.round(state.campaignPan.y)}px) scale(${zoom})`;
 }
 
 function ensureCampaignPan(layout) {
@@ -1058,6 +1065,7 @@ function ensureCampaignPan(layout) {
     state.campaignPan = {
       x: clamp(defaultX, bounds.minX, bounds.maxX),
       y: clamp(defaultY, bounds.minY, bounds.maxY),
+      zoom: 1,
       dragging: false,
       pointerId: null,
       startClientX: 0,
@@ -1068,6 +1076,7 @@ function ensureCampaignPan(layout) {
     };
     state.campaignPanLayoutKey = layout.key;
   } else {
+    state.campaignPan.zoom = clamp(Number(state.campaignPan.zoom) || 1, CAMPAIGN_MAP_MIN_ZOOM, CAMPAIGN_MAP_MAX_ZOOM);
     state.campaignPan.x = clamp(state.campaignPan.x, bounds.minX, bounds.maxX);
     state.campaignPan.y = clamp(state.campaignPan.y, bounds.minY, bounds.maxY);
   }
@@ -1117,6 +1126,25 @@ function bindCampaignPanHandlers() {
   map.addEventListener("pointerup", endDrag);
   map.addEventListener("pointercancel", endDrag);
   map.addEventListener("pointerleave", endDrag);
+  map.addEventListener("wheel", (ev) => {
+    if (!state.campaignPan || !state.campaignLayout) return;
+    ev.preventDefault();
+    const oldZoom = clamp(Number(state.campaignPan.zoom) || 1, CAMPAIGN_MAP_MIN_ZOOM, CAMPAIGN_MAP_MAX_ZOOM);
+    const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? map.clientHeight : 1;
+    const wheelDelta = ev.deltaY * unit;
+    const nextZoom = clamp(oldZoom * Math.exp(-wheelDelta * CAMPAIGN_MAP_ZOOM_STEP), CAMPAIGN_MAP_MIN_ZOOM, CAMPAIGN_MAP_MAX_ZOOM);
+    if (Math.abs(nextZoom - oldZoom) < 0.0001) return;
+    const rect = map.getBoundingClientRect();
+    const focusX = ev.clientX - rect.left;
+    const focusY = ev.clientY - rect.top;
+    state.campaignPan.zoom = nextZoom;
+    state.campaignPan.x = focusX - ((focusX - state.campaignPan.x) / oldZoom) * nextZoom;
+    state.campaignPan.y = focusY - ((focusY - state.campaignPan.y) / oldZoom) * nextZoom;
+    const bounds = campaignPanBounds(state.campaignLayout);
+    state.campaignPan.x = clamp(state.campaignPan.x, bounds.minX, bounds.maxX);
+    state.campaignPan.y = clamp(state.campaignPan.y, bounds.minY, bounds.maxY);
+    applyCampaignPan();
+  }, { passive: false });
   state.campaignPanBound = true;
 }
 
