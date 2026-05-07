@@ -1172,6 +1172,17 @@ const RULES = [
     },
   },
   {
+    id: "del_land_expansion_10",
+    kind: "delayed",
+    delayTurns: 10,
+    becomesPermanent: true,
+    name: "Land Expansion",
+    description: "In 10 turns, a 4x4 territory is added around the board edge. Stacks loop around, completing larger square boards.",
+    apply(game) {
+      game.expandBoard?.(4);
+    },
+  },
+  {
     id: "dur_ads_7",
     kind: "duration",
     durationTurns: 7,
@@ -1456,17 +1467,6 @@ const RULES = [
     description: "For 6 turns, landed-on squares become sticky. Pieces landing on sticky squares can't move next turn.",
     modifiers() {
       return { stickySquaresActive: true };
-    },
-  },
-  {
-    id: "del_land_expansion_10",
-    kind: "delayed",
-    delayTurns: 10,
-    becomesPermanent: true,
-    name: "Land Expansion",
-    description: "In 10 turns, a 4x4 territory is added around the board edge. Stacks loop around, completing larger square boards.",
-    apply(game) {
-      game.expandBoard?.(4);
     },
   },
 ];
