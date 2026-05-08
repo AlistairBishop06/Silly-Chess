@@ -1,122 +1,8 @@
 /* global io */
 
-const socket = io({
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 500,
-  reconnectionDelayMax: 5000,
-  timeout: 20000,
-});
+const socket = window.ChaosChessRealtime.createSocket(io);
 
-const els = {
-  status: document.getElementById("status"),
-  profileBtn: document.getElementById("profileBtn"),
-  accountSummary: document.getElementById("accountSummary"),
-  accountActionBtn: document.getElementById("accountActionBtn"),
-  authModal: document.getElementById("authModal"),
-  authTitle: document.getElementById("authTitle"),
-  authCloseBtn: document.getElementById("authCloseBtn"),
-  loginTabBtn: document.getElementById("loginTabBtn"),
-  signupTabBtn: document.getElementById("signupTabBtn"),
-  authUsername: document.getElementById("authUsername"),
-  authPassword: document.getElementById("authPassword"),
-  authStatus: document.getElementById("authStatus"),
-  authSubmitBtn: document.getElementById("authSubmitBtn"),
-  profileModal: document.getElementById("profileModal"),
-  profileCloseBtn: document.getElementById("profileCloseBtn"),
-  profileTabs: document.getElementById("profileTabs"),
-  profileContent: document.getElementById("profileContent"),
-  adminTabBtn: document.getElementById("adminTabBtn"),
-  logoutBtn: document.getElementById("logoutBtn"),
-  singleplayerBtn: document.getElementById("singleplayerBtn"),
-  campaignPanel: document.getElementById("campaignPanel"),
-  campaignBackBtn: document.getElementById("campaignBackBtn"),
-  campaignSummary: document.getElementById("campaignSummary"),
-  campaignMap: document.getElementById("campaignMap"),
-  campaignNotice: document.getElementById("campaignNotice"),
-  createBtn: document.getElementById("createBtn"),
-  createModal: document.getElementById("createModal"),
-  createCloseBtn: document.getElementById("createCloseBtn"),
-  createPublicBtn: document.getElementById("createPublicBtn"),
-  createPrivateBtn: document.getElementById("createPrivateBtn"),
-  shopBtn: document.getElementById("shopBtn"),
-  shopModal: document.getElementById("shopModal"),
-  shopCloseBtn: document.getElementById("shopCloseBtn"),
-  shopResetTimer: document.getElementById("shopResetTimer"),
-  shopStatus: document.getElementById("shopStatus"),
-  shopOffers: document.getElementById("shopOffers"),
-  code: document.getElementById("codeInput"),
-  joinBtn: document.getElementById("joinBtn"),
-  joinModal: document.getElementById("joinModal"),
-  joinCloseBtn: document.getElementById("joinCloseBtn"),
-  joinCodeBtn: document.getElementById("joinCodeBtn"),
-  refreshServersBtn: document.getElementById("refreshServersBtn"),
-  openServers: document.getElementById("openServers"),
-  rulebookBtn: document.getElementById("rulebookBtn"),
-  rulebookModal: document.getElementById("rulebookModal"),
-  rulebookCloseBtn: document.getElementById("rulebookCloseBtn"),
-  rulebookCards: document.getElementById("rulebookCards"),
-  lobbyPanel: document.getElementById("lobbyPanel"),
-  gamePanel: document.getElementById("gamePanel"),
-  leaveBtn: document.getElementById("leaveBtn"),
-  resultModal: document.getElementById("resultModal"),
-  resultTitle: document.getElementById("resultTitle"),
-  resultDetail: document.getElementById("resultDetail"),
-  readyStatus: document.getElementById("readyStatus"),
-  readyBtn: document.getElementById("readyBtn"),
-  confetti: document.getElementById("confetti"),
-  lobbyCode: document.getElementById("lobbyCode"),
-  youInfo: document.getElementById("youInfo"),
-  turnInfo: document.getElementById("turnInfo"),
-  plyInfo: document.getElementById("plyInfo"),
-  emoteBtn: document.getElementById("emoteBtn"),
-  canvas: document.getElementById("board"),
-  overlayText: document.getElementById("overlayText"),
-  sideLabelTop: document.getElementById("sideLabelTop"),
-  sideLabelBottom: document.getElementById("sideLabelBottom"),
-  boardWrap: document.querySelector(".boardWrap"),
-  activeCards: document.getElementById("activeCards"),
-  choiceArea: document.getElementById("choiceArea"),
-  choiceCards: document.getElementById("choiceCards"),
-  choiceTimer: document.getElementById("choiceTimer"),
-  choiceTitle: document.getElementById("choiceTitle"),
-  rpsModal: document.getElementById("rpsModal"),
-  rpsTimer: document.getElementById("rpsTimer"),
-  rpsStatus: document.getElementById("rpsStatus"),
-  rpsRockBtn: document.getElementById("rpsRockBtn"),
-  rpsPaperBtn: document.getElementById("rpsPaperBtn"),
-  rpsScissorsBtn: document.getElementById("rpsScissorsBtn"),
-  wagerModal: document.getElementById("wagerModal"),
-  wagerTimer: document.getElementById("wagerTimer"),
-  wagerStatus: document.getElementById("wagerStatus"),
-  wagerYouGrid: document.getElementById("wagerYouGrid"),
-  wagerOppGrid: document.getElementById("wagerOppGrid"),
-  wagerConfirmBtn: document.getElementById("wagerConfirmBtn"),
-  coinArea: document.getElementById("coinArea"),
-  coinAssign: document.getElementById("coinAssign"),
-  coinSpin: document.getElementById("coinSpin"),
-  wagerResult: document.getElementById("wagerResult"),
-  supermarketModal: document.getElementById("supermarketModal"),
-  supermarketBudget: document.getElementById("supermarketBudget"),
-  supermarketStatus: document.getElementById("supermarketStatus"),
-  supermarketItems: document.getElementById("supermarketItems"),
-  supermarketCheckoutBtn: document.getElementById("supermarketCheckoutBtn"),
-  fruitMachineModal: document.getElementById("fruitMachineModal"),
-  fruitMachineSpins: document.getElementById("fruitMachineSpins"),
-  fruitMachineStatus: document.getElementById("fruitMachineStatus"),
-  fruitMachineCabinet: document.getElementById("fruitMachineCabinet"),
-  fruitMachineReels: document.getElementById("fruitMachineReels"),
-  fruitMachineLever: document.getElementById("fruitMachineLever"),
-  fruitMachinePrize: document.getElementById("fruitMachinePrize"),
-  mutantModal: document.getElementById("mutantModal"),
-  mutantStatus: document.getElementById("mutantStatus"),
-  mutantSelected: document.getElementById("mutantSelected"),
-  mutantConfirmBtn: document.getElementById("mutantConfirmBtn"),
-  cardPopupLayer: document.getElementById("cardPopupLayer"),
-  adsLayer: document.getElementById("adsLayer"),
-  log: document.getElementById("log"),
-  gameMsg: document.getElementById("gameMsg"),
-};
+const els = window.ChaosChessDom.getElements();
 
 const ctx = els.canvas.getContext("2d");
 
@@ -180,107 +66,37 @@ const state = {
   activeCampaignLevel: null,
 };
 
+const boardGeometry = window.ChaosChessBoardGeometry.create({ els, state });
+const {
+  algebraic,
+  boardSize,
+  canvasPoint,
+  canvasToSquare,
+  sqToAlg,
+  squareToCanvasCenter,
+  titanAnchorAtSquare,
+  titanAnchorFromCanvasPoint,
+  titanBounds,
+  titanFootprint,
+  toIdxSafe,
+} = boardGeometry;
+
 const confetti = {
   running: false,
   parts: [],
   raf: 0,
 };
 
-const CARD_POPUP_HOLD_MS = 2000;
-const CARD_POPUP_EXIT_MS = 560;
-const CARD_POPUP_ENTER_MS = Math.max(240, CARD_POPUP_HOLD_MS - CARD_POPUP_EXIT_MS);
-const CAMPAIGN_CONFIG = {
-  totalLevels: 100,
-  levelsPerWorld: 10,
-  chestEvery: 3,
-  basicRuleIds: [
-    "inst_oops_explosion",
-    "inst_pawn_herding",
-    "inst_rps_duel",
-    "inst_swap_queens",
-    "inst_coinflip_wager",
-  ],
-  excludedFromCampaignPool: [],
-};
-const CAMPAIGN_MAP_MIN_ZOOM = 0.65;
-const CAMPAIGN_MAP_MAX_ZOOM = 1.9;
-const CAMPAIGN_MAP_ZOOM_STEP = 0.0015;
-const CAMPAIGN_BIOMES = [
-  "grass",
-  "forest",
-  "cliff",
-  "swamp",
-  "desert",
-  "ice",
-  "volcano",
-  "ruins",
-  "sky",
-  "citadel",
-];
-
-const PIECE_GLYPH_MONO = {
-  p: "\u2659",
-  n: "\u2658",
-  b: "\u2657",
-  r: "\u2656",
-  q: "\u2655",
-  k: "\u2654",
-};
-
-function sqToAlg(sq) {
-  const size = boardSize();
-  const file = sq % size;
-  const rank = Math.floor(sq / size);
-  return String.fromCharCode(97 + file) + String(rank + 1);
-}
-
-function titanFootprint(anchor) {
-  const size = boardSize();
-  const file = anchor % size;
-  const rank = Math.floor(anchor / size);
-  if (file < 0 || file > size - 2 || rank < 0 || rank > size - 2) return [];
-  return [anchor, anchor + 1, anchor + size, anchor + size + 1];
-}
-
-function titanAnchorAtSquare(board, square) {
-  const piece = board?.[square];
-  if (piece?.tags?.includes("titan")) return square;
-  if (!piece?.tags?.includes("titanBody")) return null;
-  const size = boardSize();
-  const candidates = [square, square - 1, square - size, square - size - 1].filter((sq) => sq >= 0 && sq < (board || []).length);
-  for (const candidate of candidates) {
-    const titan = board?.[candidate];
-    if (!titan?.tags?.includes("titan")) continue;
-    if (titanFootprint(candidate).includes(square)) return candidate;
-  }
-  return null;
-}
-
-function titanBounds(anchor) {
-  const footprint = titanFootprint(anchor).map((sq) => squareToCanvasCenter(sq));
-  const xs = footprint.map((p) => p.x);
-  const ys = footprint.map((p) => p.y);
-  return {
-    left: Math.min(...xs),
-    right: Math.max(...xs),
-    top: Math.min(...ys),
-    bottom: Math.max(...ys),
-  };
-}
-
-function titanAnchorFromCanvasPoint(anchors, px, py) {
-  const point = canvasPoint(px, py);
-  const size = els.canvas.width / boardSize();
-  for (const anchor of anchors || []) {
-    const box = titanBounds(anchor);
-    const left = box.left - size / 2;
-    const right = box.right + size / 2;
-    const top = box.top - size / 2;
-    const bottom = box.bottom + size / 2;
-    if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom) return anchor;
-  }
-  return null;
-}
+const CLIENT_CONSTANTS = window.ChaosChessConstants;
+const CARD_POPUP_HOLD_MS = CLIENT_CONSTANTS.cardPopup.holdMs;
+const CARD_POPUP_EXIT_MS = CLIENT_CONSTANTS.cardPopup.exitMs;
+const CARD_POPUP_ENTER_MS = CLIENT_CONSTANTS.cardPopup.enterMs;
+const CAMPAIGN_CONFIG = CLIENT_CONSTANTS.campaign.config;
+const CAMPAIGN_MAP_MIN_ZOOM = CLIENT_CONSTANTS.campaign.mapMinZoom;
+const CAMPAIGN_MAP_MAX_ZOOM = CLIENT_CONSTANTS.campaign.mapMaxZoom;
+const CAMPAIGN_MAP_ZOOM_STEP = CLIENT_CONSTANTS.campaign.mapZoomStep;
+const CAMPAIGN_BIOMES = CLIENT_CONSTANTS.campaign.biomes;
+const PIECE_GLYPH_MONO = CLIENT_CONSTANTS.pieceGlyphMono;
 
 function stopConfetti() {
   confetti.running = false;
@@ -404,29 +220,18 @@ function enterLobby({ code, playerId, color }) {
 }
 
 function loadSession() {
-  try {
-    const raw = localStorage.getItem("chaosChessSession");
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (!s || typeof s !== "object") return;
-    if (typeof s.lobby === "string") state.lobby = s.lobby;
-    if (typeof s.playerId === "string") state.playerId = s.playerId;
-    if (s.color === "w" || s.color === "b") state.color = s.color;
-  } catch {
-    // ignore
-  }
+  const saved = window.ChaosChessStorage.loadGameSession();
+  if (saved.lobby) state.lobby = saved.lobby;
+  if (saved.playerId) state.playerId = saved.playerId;
+  if (saved.color) state.color = saved.color;
 }
 
 function saveSession() {
-  try {
-    if (!state.lobby || !state.playerId || !state.color) {
-      localStorage.removeItem("chaosChessSession");
-      return;
-    }
-    localStorage.setItem("chaosChessSession", JSON.stringify({ lobby: state.lobby, playerId: state.playerId, color: state.color }));
-  } catch {
-    // ignore
-  }
+  window.ChaosChessStorage.saveGameSession({
+    lobby: state.lobby,
+    playerId: state.playerId,
+    color: state.color,
+  });
 }
 
 function campaignChestMilestones() {
@@ -1389,27 +1194,16 @@ async function resetCampaignProgress() {
 }
 
 function loadAccountSession() {
-  try {
-    const raw = localStorage.getItem("chaosChessAccount");
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (typeof saved?.token === "string") state.authToken = saved.token;
-    if (saved?.user && typeof saved.user === "object") state.account = saved.user;
-  } catch {
-    // ignore
-  }
+  const saved = window.ChaosChessStorage.loadAccountSession();
+  if (saved.token) state.authToken = saved.token;
+  if (saved.user) state.account = saved.user;
 }
 
 function saveAccountSession() {
-  try {
-    if (!state.authToken || !state.account) {
-      localStorage.removeItem("chaosChessAccount");
-      return;
-    }
-    localStorage.setItem("chaosChessAccount", JSON.stringify({ token: state.authToken, user: state.account }));
-  } catch {
-    // ignore
-  }
+  window.ChaosChessStorage.saveAccountSession({
+    token: state.authToken,
+    user: state.account,
+  });
 }
 
 function authHeaders() {
@@ -2501,164 +2295,7 @@ function nowMs() {
   return performance.now();
 }
 
-const draggableModalState = new WeakMap();
-let draggableModalRaf = 0;
-
-function getModalState(card) {
-  let s = draggableModalState.get(card);
-  if (s) return s;
-  s = {
-    x: 0,
-    y: 0,
-    vx: 0,
-    vy: 0,
-    angle: 0,
-    dragging: false,
-    pointerId: null,
-    lastPx: 0,
-    lastPy: 0,
-    lastTs: 0,
-  };
-  draggableModalState.set(card, s);
-  return s;
-}
-
-function applyModalTransform(card, s) {
-  card.style.transform = `translate3d(${s.x.toFixed(2)}px, ${s.y.toFixed(2)}px, 0) rotate(${s.angle.toFixed(2)}deg)`;
-}
-
-function modalBounds(card, s) {
-  const rect = card.getBoundingClientRect();
-  const baseLeft = rect.left - s.x;
-  const baseTop = rect.top - s.y;
-  return {
-    minX: -baseLeft,
-    maxX: window.innerWidth - rect.width - baseLeft,
-    minY: -baseTop,
-    maxY: window.innerHeight - rect.height - baseTop,
-  };
-}
-
-function keepModalInBounds(card) {
-  const s = getModalState(card);
-  const b = modalBounds(card, s);
-  s.x = Math.max(b.minX, Math.min(b.maxX, s.x));
-  s.y = Math.max(b.minY, Math.min(b.maxY, s.y));
-  applyModalTransform(card, s);
-}
-
-function tickDraggableModals(ts) {
-  draggableModalRaf = 0;
-  let stillMoving = false;
-  document.querySelectorAll(".modal:not([hidden]) .modalCard").forEach((card) => {
-    const s = getModalState(card);
-    if (s.dragging) return;
-    if (Math.abs(s.vx) < 0.012 && Math.abs(s.vy) < 0.012 && Math.abs(s.angle) < 0.05) {
-      s.vx = 0;
-      s.vy = 0;
-      s.angle *= 0.88;
-      applyModalTransform(card, s);
-      return;
-    }
-
-    const dtMs = Math.min(32, Math.max(8, ts - (s.lastTs || ts)));
-    const dt = dtMs / 16.6667;
-    const dtPx = dtMs;
-    s.lastTs = ts;
-    s.x += s.vx * dtPx;
-    s.y += s.vy * dtPx;
-    s.angle += (s.vx * 3.6 - s.angle) * 0.08;
-
-    const b = modalBounds(card, s);
-    if (s.x < b.minX) {
-      s.x = b.minX;
-      s.vx = Math.abs(s.vx) * 0.82;
-    } else if (s.x > b.maxX) {
-      s.x = b.maxX;
-      s.vx = -Math.abs(s.vx) * 0.82;
-    }
-    if (s.y < b.minY) {
-      s.y = b.minY;
-      s.vy = Math.abs(s.vy) * 0.82;
-    } else if (s.y > b.maxY) {
-      s.y = b.maxY;
-      s.vy = -Math.abs(s.vy) * 0.82;
-    }
-
-    s.vx *= 0.972;
-    s.vy *= 0.972;
-    s.angle *= 0.95;
-    applyModalTransform(card, s);
-    stillMoving = true;
-  });
-
-  if (stillMoving) draggableModalRaf = requestAnimationFrame(tickDraggableModals);
-}
-
-function ensureDraggableTick() {
-  if (draggableModalRaf) return;
-  draggableModalRaf = requestAnimationFrame(tickDraggableModals);
-}
-
-function bindDraggableModalCard(card) {
-  if (!card || card.dataset.draggableModal === "1") return;
-  card.dataset.draggableModal = "1";
-  const dragHandle = card.querySelector(".cardsHeader, .modalTitle") || card;
-  const s = getModalState(card);
-
-  dragHandle.addEventListener("pointerdown", (ev) => {
-    if (ev.button !== 0) return;
-    if (ev.target?.closest("button, input, textarea, select, a, label")) return;
-    s.dragging = true;
-    s.pointerId = ev.pointerId;
-    s.lastPx = ev.clientX;
-    s.lastPy = ev.clientY;
-    s.lastTs = nowMs();
-    s.vx = 0;
-    s.vy = 0;
-    card.classList.add("is-dragging");
-    dragHandle.setPointerCapture?.(ev.pointerId);
-    ev.preventDefault();
-  });
-
-  dragHandle.addEventListener("pointermove", (ev) => {
-    if (!s.dragging || s.pointerId !== ev.pointerId) return;
-    const now = nowMs();
-    const dx = ev.clientX - s.lastPx;
-    const dy = ev.clientY - s.lastPy;
-    const dt = Math.max(8, now - s.lastTs);
-    s.lastPx = ev.clientX;
-    s.lastPy = ev.clientY;
-    s.lastTs = now;
-    s.x += dx;
-    s.y += dy;
-    const instVx = dx / dt;
-    const instVy = dy / dt;
-    s.vx = s.vx * 0.56 + instVx * 0.44;
-    s.vy = s.vy * 0.56 + instVy * 0.44;
-    s.angle = Math.max(-2.2, Math.min(2.2, s.vx * 8));
-    keepModalInBounds(card);
-    ev.preventDefault();
-  });
-
-  const release = (ev) => {
-    if (!s.dragging || (ev && s.pointerId !== ev.pointerId)) return;
-    s.dragging = false;
-    s.pointerId = null;
-    card.classList.remove("is-dragging");
-    ensureDraggableTick();
-  };
-  dragHandle.addEventListener("pointerup", release);
-  dragHandle.addEventListener("pointercancel", release);
-  dragHandle.addEventListener("lostpointercapture", release);
-}
-
-function initDraggableModals() {
-  document.querySelectorAll(".modal .modalCard").forEach(bindDraggableModalCard);
-  window.addEventListener("resize", () => {
-    document.querySelectorAll(".modal .modalCard").forEach((card) => keepModalInBounds(card));
-  }, { passive: true });
-}
+const initDraggableModals = window.ChaosChessDraggableModals.init;
 
 function playSound(type) {
   // Tiny WebAudio sfx without external assets.
@@ -2698,55 +2335,6 @@ function spawnParticles(squares, color) {
     // Quick flash ring
     state.particles.push({ ring: true, x, y, life: 220, born: nowMs(), color, r: size * 0.1 });
   }
-}
-
-function algebraic(sq) {
-  const size = boardSize();
-  const file = sq % size;
-  const rank = Math.floor(sq / size);
-  return String.fromCharCode(97 + file) + (rank + 1);
-}
-
-function boardSize() {
-  const size = Number(state.serverState?.boardSize || 8);
-  return Number.isInteger(size) && size >= 8 ? size : 8;
-}
-
-function canvasToSquare(px, py) {
-  const boardN = boardSize();
-  const { x, y } = canvasPoint(px, py);
-  const size = els.canvas.width / boardN;
-  let file = Math.floor(x / size);
-  let rank = boardN - 1 - Math.floor(y / size);
-  if (file < 0 || file >= boardN || rank < 0 || rank >= boardN) return -1;
-
-  if (state.flipVisual) {
-    file = boardN - 1 - file;
-    rank = boardN - 1 - rank;
-  }
-  return rank * boardN + file;
-}
-
-function canvasPoint(px, py) {
-  const rect = els.canvas.getBoundingClientRect();
-  return {
-    x: ((px - rect.left) / rect.width) * els.canvas.width,
-    y: ((py - rect.top) / rect.height) * els.canvas.height,
-  };
-}
-
-function squareToCanvasCenter(sq) {
-  const boardN = boardSize();
-  const size = els.canvas.width / boardN;
-  let file = sq % boardN;
-  let rank = Math.floor(sq / boardN);
-  if (state.flipVisual) {
-    file = boardN - 1 - file;
-    rank = boardN - 1 - rank;
-  }
-  const x = (file + 0.5) * size;
-  const y = (boardN - 1 - rank + 0.5) * size;
-  return { x, y };
 }
 
 function cosmeticSlug(value) {
@@ -4483,7 +4071,7 @@ function buildRuleCard(r, { pickable }) {
     <div class="desc">${escapeHtml(r.description)}</div>
   `;
 
-  bindCardFX(div);
+  window.ChaosChessCardFx.bind(div);
   return div;
 }
 
@@ -4516,67 +4104,11 @@ function showCardPopup(effect) {
   setTimeout(() => wrap.remove(), CARD_POPUP_HOLD_MS + CARD_POPUP_EXIT_MS);
 }
 
-function bindCardFX(card) {
-  if (!card || card.dataset.cardFx === "1") return;
-  card.dataset.cardFx = "1";
-
-  let raf = 0;
-  let next = { rx: 0, ry: 0, mx: "50%", my: "50%" };
-
-  const apply = () => {
-    raf = 0;
-    card.style.setProperty("--rx", `${next.rx}deg`);
-    card.style.setProperty("--ry", `${next.ry}deg`);
-    card.style.setProperty("--mx", next.mx);
-    card.style.setProperty("--my", next.my);
-  };
-
-  const schedule = () => {
-    if (raf) return;
-    raf = requestAnimationFrame(apply);
-  };
-
-  const updateFromPointer = (ev) => {
-    const rect = card.getBoundingClientRect();
-    const px = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-    const py = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
-
-    const maxTilt = card.classList.contains("pickable") ? 16 : 12;
-    const ry = (px - 0.5) * maxTilt * 2;
-    const rx = -(py - 0.5) * maxTilt * 2;
-
-    next = {
-      rx,
-      ry,
-      mx: `${Math.round(px * 100)}%`,
-      my: `${Math.round(py * 100)}%`,
-    };
-    schedule();
-  };
-
-  card.addEventListener("pointerenter", () => {
-    card.classList.add("is-tilting");
-  });
-  card.addEventListener("pointermove", (ev) => {
-    if (ev.pointerType === "touch") return;
-    updateFromPointer(ev);
-  });
-  card.addEventListener("pointerleave", () => {
-    card.classList.remove("is-tilting");
-    next = { rx: 0, ry: 0, mx: "50%", my: "50%" };
-    schedule();
-  });
-}
-
 function updateChoiceTimer() {
   const s = state.serverState;
   if (!s || els.choiceArea.hidden) return;
   const remainingMs = Math.max(0, (s.ruleChoiceDeadlineMs || 0) - Date.now());
   els.choiceTimer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
-}
-
-function toIdxSafe(file, rank) {
-  return rank * boardSize() + file;
 }
 
 function updateRpsTimer() {
