@@ -1343,7 +1343,7 @@ function renderProfile() {
   const rank = user.rank || {};
   const created = user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-";
   const winRate = Number(stats.winRate || 0);
-  const avatar = escapeHtml(profile.avatar || user.username.slice(0, 2).toUpperCase());
+  const avatar = avatarMarkup(profile, user.username, "Profile avatar");
   const country = profile.country ? `<span>${escapeHtml(profile.country)}</span>` : `<span>Region unset</span>`;
   const bio = profile.bio ? escapeHtml(profile.bio) : "No bio yet.";
   const tier = escapeHtml(rank.tier || "Bronze");
@@ -1400,6 +1400,17 @@ function playerFallbackProfile(player) {
 
 function bannerClass(name) {
   return String(name || "Sunset Clash").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "sunset-clash";
+}
+
+function avatarUrl(profile, fallbackSeed = "player") {
+  if (profile?.avatarUrl) return profile.avatarUrl;
+  const style = String(profile?.avatar || "lorelei").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "") || "lorelei";
+  const seed = String(profile?.avatarSeed || fallbackSeed || "player").slice(0, 128);
+  return `/api/avatar/${encodeURIComponent(style)}.svg?seed=${encodeURIComponent(seed)}`;
+}
+
+function avatarMarkup(profile, fallbackSeed = "player", alt = "") {
+  return `<img src="${escapeAttr(avatarUrl(profile, fallbackSeed))}" alt="${escapeAttr(alt)}" loading="lazy" draggable="false" />`;
 }
 
 function n(value) {
@@ -1759,7 +1770,8 @@ function cosmeticPreview(item) {
   const slug = cosmeticSlug(item.name);
   const label = escapeHtml(item.label || item.name);
   if (group === "avatars") {
-    return `<div class="shopPreview avatarPreview">${escapeHtml(item.name.slice(0, 4).toUpperCase())}</div>`;
+    const previewSeed = state.account?.profile?.avatarSeed || state.account?.id || state.account?.username || item.name;
+    return `<div class="shopPreview avatarPreview">${avatarMarkup({ avatar: item.name, avatarSeed: previewSeed }, previewSeed, item.label || item.name)}</div>`;
   }
   if (group === "borders") {
     const cls = borderClass({ border: item.name });
@@ -4540,12 +4552,12 @@ function currentEmote(playerId) {
 function renderBoardName(player) {
   if (!player) return "";
   const profile = player.profile || {};
-  const avatar = (profile.avatar || player.name || "?").slice(0, 4).toUpperCase();
+  const avatar = avatarMarkup(profile, player.name || player.id || "player", `${player.name || "Player"} avatar`);
   const emote = currentEmote(player.id);
   const cls = ["boardNameAvatar", borderClass(profile)].filter(Boolean).join(" ");
   return `
     <button class="boardNameButton" type="button" data-player-id="${escapeAttr(player.id || "")}" title="View ${escapeAttr(player.name || "player")} profile">
-      <span class="${escapeAttr(cls)}">${escapeHtml(avatar)}</span>
+      <span class="${escapeAttr(cls)}">${avatar}</span>
       <span class="boardNameText">${escapeHtml(player.name || "Player")}</span>
     </button>
     ${emote ? `<span class="boardNameEmote">${escapeHtml(emote)}</span>` : ""}

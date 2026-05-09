@@ -1546,6 +1546,7 @@ body.is-in-game:not(.is-choosing) #gamePanel {
   font-size: 11px;
   font-weight: 950;
   text-shadow: none;
+  overflow: hidden;
 }
 
 .boardNameAvatar::before {
@@ -1554,6 +1555,13 @@ body.is-in-game:not(.is-choosing) #gamePanel {
   inset: -3px;
   border-radius: 10px;
   pointer-events: none;
+}
+
+.boardNameAvatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .boardNameText {
@@ -3147,6 +3155,14 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   font-size: clamp(26px, 4vw, 42px);
   font-weight: 950;
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+.profileAvatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .profileHeroMain {
@@ -3826,6 +3842,18 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   font-weight: 950;
   text-align: center;
   overflow-wrap: anywhere;
+}
+
+.avatarPreview img {
+  width: min(100%, 132px);
+  height: min(100%, 132px);
+  display: block;
+  object-fit: cover;
+}
+
+.dailyShopItem.shopFeatureTall .avatarPreview img {
+  width: min(100%, 190px);
+  height: min(100%, 190px);
 }
 
 .borderPreview::before {

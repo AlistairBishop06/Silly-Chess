@@ -142,6 +142,41 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   }
   
   const ADMIN_MIN_COIN_BALANCE = 1_000_000_000;
+  const DEFAULT_AVATAR_STYLE = "thumbs";
+  const AVATAR_STYLE_ALIASES = {
+    adventurer: "adventurer",
+    "adventurer-neutral": "adventurerNeutral",
+    avataaars: "avataaars",
+    "avataaars-neutral": "avataaarsNeutral",
+    "big-ears": "bigEars",
+    "big-ears-neutral": "bigEarsNeutral",
+    "big-smile": "bigSmile",
+    "bottts": "bottts",
+    "bottts-neutral": "botttsNeutral",
+    croodles: "croodles",
+    "croodles-neutral": "croodlesNeutral",
+    dylan: "dylan",
+    "fun-emoji": "funEmoji",
+    glass: "glass",
+    icons: "icons",
+    identicon: "identicon",
+    initials: "initials",
+    lorelei: "lorelei",
+    "lorelei-neutral": "loreleiNeutral",
+    micah: "micah",
+    miniavs: "miniavs",
+    notionists: "notionists",
+    "notionists-neutral": "notionistsNeutral",
+    "open-peeps": "openPeeps",
+    personas: "personas",
+    "pixel-art": "pixelArt",
+    "pixel-art-neutral": "pixelArtNeutral",
+    rings: "rings",
+    shapes: "shapes",
+    thumbs: "thumbs",
+    "toon-head": "toonHead",
+  };
+  let dicebearModulesPromise = null;
   const CAMPAIGN_CONFIG = {
     totalLevels: 100,
     levelsPerWorld: 10,
@@ -199,7 +234,8 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   function defaultProfile(username = "Player") {
     const customAvatar = normalizeUsername(username).slice(0, 2).toUpperCase() || "CC";
     return {
-      avatar: customAvatar,
+      avatar: DEFAULT_AVATAR_STYLE,
+      avatarSeed: "",
       customAvatar,
       banner: "Sunset Clash",
       country: "",
@@ -226,10 +262,19 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     }
     user.profile = { ...defaultProfile(user.username), ...(user.profile || {}) };
     const avatarCatalog = new Set((COSMETIC_CATALOG.avatars || []).map((item) => item.name));
+    if (!avatarCatalog.has(user.profile.avatar)) {
+      if (user.profile.avatar) user.profile.customAvatar = String(user.profile.avatar).slice(0, 4);
+      user.profile.avatar = DEFAULT_AVATAR_STYLE;
+    }
+    if (!user.profile.avatarDefaultMigratedToThumbs && ["lorelei", "pixel-art"].includes(user.profile.avatar)) {
+      user.profile.avatar = DEFAULT_AVATAR_STYLE;
+      user.profile.avatarDefaultMigratedToThumbs = true;
+    }
+    if (!user.profile.avatarSeed) {
+      user.profile.avatarSeed = user.id ? `user:${user.id}` : `user:${user.usernameKey || usernameKey(user.username)}`;
+    }
     if (!user.profile.customAvatar) {
-      user.profile.customAvatar = avatarCatalog.has(user.profile.avatar)
-        ? (normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC")
-        : (user.profile.avatar || normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC");
+      user.profile.customAvatar = normalizeUsername(user.username).slice(0, 2).toUpperCase() || "CC";
     }
     user.matchHistory = Array.isArray(user.matchHistory) ? user.matchHistory : [];
     user.ruleCollection = user.ruleCollection && typeof user.ruleCollection === "object" ? user.ruleCollection : {};
@@ -386,6 +431,44 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   
   const { buildAchievementsForUser } = createAchievementService({ allRules, hydrateUser });
 
+  function avatarStyleKey(style) {
+    const raw = String(style || DEFAULT_AVATAR_STYLE).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
+    return AVATAR_STYLE_ALIASES[raw] ? raw : DEFAULT_AVATAR_STYLE;
+  }
+
+  function avatarSeedForUser(user) {
+    return user?.profile?.avatarSeed || (user?.id ? `user:${user.id}` : `user:${user?.usernameKey || usernameKey(user?.username)}`);
+  }
+
+  function avatarUrl(style, seed) {
+    const avatarStyle = avatarStyleKey(style);
+    const avatarSeed = String(seed || "player").slice(0, 128);
+    return `/api/avatar/${encodeURIComponent(avatarStyle)}.svg?seed=${encodeURIComponent(avatarSeed)}`;
+  }
+
+  function publicProfile(user) {
+    hydrateUser(user);
+    const p = user?.profile || {};
+    const style = avatarStyleKey(p.avatar);
+    const seed = avatarSeedForUser(user);
+    return {
+      ...p,
+      avatar: style,
+      avatarSeed: seed,
+      avatarUrl: avatarUrl(style, seed),
+    };
+  }
+
+  async function dicebearModules() {
+    if (!dicebearModulesPromise) {
+      dicebearModulesPromise = Promise.all([import("@dicebear/core"), import("@dicebear/collection")]).then(([core, collection]) => ({
+        createAvatar: core.createAvatar,
+        collection,
+      }));
+    }
+    return dicebearModulesPromise;
+  }
+
   function catalogItem(group, name) {
     return (COSMETIC_CATALOG[group] || []).find((item) => item.name === name) || null;
   }
@@ -420,19 +503,30 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   
   function dailyShopOffers(user = null, now = Date.now()) {
     const window = localDayWindow(now);
-    const candidates = [];
+    const avatarCandidates = [];
+    const otherCandidates = [];
     for (const [group, items] of Object.entries(COSMETIC_CATALOG)) {
       for (const item of items) {
         if ((item.price || 0) <= 0) continue;
-        candidates.push({ group, ...item });
+        const candidate = { group, ...item };
+        if (group === "avatars") avatarCandidates.push(candidate);
+        else otherCandidates.push(candidate);
       }
     }
   
     const random = seededRandom(hashSeed(`shop:${window.key}`));
-    const shuffled = candidates
+    const shuffleForShop = (items) =>
+      items
+        .map((item) => ({ item, sort: random() }))
+        .sort((a, b) => a.sort - b.sort)
+        .map(({ item }) => item);
+    const limited = [
+      ...shuffleForShop(avatarCandidates).slice(0, 1),
+      ...shuffleForShop(otherCandidates).slice(0, 4),
+    ];
+    const shuffled = limited
       .map((item) => ({ item, sort: random() }))
       .sort((a, b) => a.sort - b.sort)
-      .slice(0, 5)
       .map(({ item }) => {
         const owned = user ? ownsCosmetic(user, item.group, item.name) : false;
         return {
@@ -489,9 +583,11 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   
   function publicPlayerProfile(user) {
     hydrateUser(user);
-    const p = user?.profile || {};
+    const p = publicProfile(user);
     return {
-      avatar: p.avatar || "CC",
+      avatar: p.avatar || DEFAULT_AVATAR_STYLE,
+      avatarSeed: p.avatarSeed,
+      avatarUrl: p.avatarUrl,
       banner: p.banner || "Sunset Clash",
       boardSkin: p.boardSkin || "Classic Chaos",
       pieceSkin: p.pieceSkin || "Standard",
@@ -533,7 +629,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       username: user.username,
       isAdmin: !!user.isAdmin,
       createdAt: user.createdAt,
-      profile: user.profile,
+      profile: publicProfile(user),
       stats: {
         ...user.stats,
         winRate,
@@ -673,6 +769,26 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   }
 
   function registerRoutes(app) {
+    app.get("/api/avatar/:style.svg", async (req, res) => {
+      try {
+        const style = avatarStyleKey(req.params.style);
+        const seed = String(req.query.seed || "player").slice(0, 128);
+        const { createAvatar, collection } = await dicebearModules();
+        const avatar = createAvatar(collection[AVATAR_STYLE_ALIASES[style]], {
+          seed,
+          size: 128,
+          radius: 8,
+          backgroundColor: ["ffd166", "24d6c8", "ff4f8b", "f8fafc"],
+        });
+        res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+        res.send(avatar.toString());
+      } catch (err) {
+        console.error("Failed to render DiceBear avatar", err);
+        res.status(500).type("text/plain").send("Avatar unavailable");
+      }
+    });
+
     app.get("/api/rules", (_req, res) => {
       const rules = allRules();
       const cards = rules.map((r) => ({
@@ -703,15 +819,16 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       if (userStore.users[key]) return res.status(409).json({ ok: false, error: "Username is already taken." });
     
       const password = hashPassword(req.body.password);
+      const id = crypto.randomUUID();
       const user = {
-        id: crypto.randomUUID(),
+        id,
         username: validation.username,
         usernameKey: key,
         salt: password.salt,
         passwordHash: password.hash,
         createdAt: new Date().toISOString(),
         stats: defaultStats(),
-        profile: defaultProfile(validation.username),
+        profile: { ...defaultProfile(validation.username), avatarSeed: `user:${id}` },
         matchHistory: [],
         ruleCollection: {},
         achievementRewards: {},
