@@ -2381,6 +2381,207 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   gap: 10px;
 }
 
+#campaignChestModal {
+  z-index: 92;
+}
+
+.campaignChestCard {
+  width: min(860px, 94vw);
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
+}
+
+.campaignChestStage {
+  --handle-lift: 0px;
+  position: relative;
+  min-height: 390px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 50% 58%, rgba(255, 209, 102, 0.18), transparent 34%),
+    radial-gradient(circle at 24% 18%, rgba(36, 214, 200, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(5, 12, 25, 0.24), rgba(5, 12, 25, 0.54));
+}
+
+.campaignChestBox {
+  position: absolute;
+  left: 50%;
+  bottom: 38px;
+  width: 220px;
+  height: 168px;
+  transform: translateX(-50%);
+}
+
+.campaignChestGlow {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 220px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 225, 120, 0.55), transparent 66%);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.8);
+}
+
+.campaignChestLid,
+.campaignChestBase {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  border: 3px solid rgba(77, 43, 14, 0.95);
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(77, 43, 14, 0.42) 49% 51%, transparent 51%),
+    linear-gradient(180deg, #ffe08b 0%, #d99531 44%, #8d5424 100%);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.36), 0 16px 26px rgba(0, 0, 0, 0.32);
+}
+
+.campaignChestLid {
+  top: 20px;
+  height: 76px;
+  border-radius: 22px 22px 7px 7px;
+  transform-origin: 50% 100%;
+  transition: transform 520ms cubic-bezier(0.2, 0.9, 0.2, 1), top 520ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.campaignChestBase {
+  bottom: 0;
+  height: 98px;
+  border-radius: 8px 8px 18px 18px;
+}
+
+.campaignChestBase::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  width: 34px;
+  height: 38px;
+  border-radius: 7px;
+  border: 3px solid rgba(77, 43, 14, 0.9);
+  background: linear-gradient(180deg, #fff0a8, #c88b28);
+  transform: translateX(-50%);
+}
+
+.campaignChestHandle {
+  position: absolute;
+  left: 50%;
+  top: 58px;
+  z-index: 3;
+  width: 74px;
+  height: 54px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 999px 999px 12px 12px;
+  border: 5px solid rgba(77, 43, 14, 0.96);
+  border-bottom-width: 10px;
+  background: transparent;
+  box-shadow: none;
+  transform: translate(-50%, var(--handle-lift));
+  touch-action: none;
+}
+
+.campaignChestHandle:hover {
+  transform: translate(-50%, calc(var(--handle-lift) - 1px));
+}
+
+.campaignChestRewards {
+  position: absolute;
+  inset: 24px 22px 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.campaignChestReward {
+  width: clamp(112px, 14vw, 156px);
+  opacity: 0;
+  transform: translateY(170px) scale(0.5) rotate(-8deg);
+  animation: rewardFlyOut 740ms cubic-bezier(0.2, 0.9, 0.22, 1.1) forwards;
+  animation-delay: calc(260ms + var(--i) * 120ms);
+}
+
+.campaignChestReward .card {
+  min-height: 160px;
+  width: 100%;
+}
+
+.campaignChestEmptyReward {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 20px;
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 860;
+  opacity: 0;
+  transform: translateY(70px);
+  animation: rewardFloatIn 520ms ease forwards 280ms;
+}
+
+.campaignChestStage.is-opening .campaignChestBox {
+  animation: chestRattle 420ms linear infinite;
+}
+
+.campaignChestStage.is-opened .campaignChestGlow {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.24);
+  transition: opacity 360ms ease, transform 500ms ease;
+}
+
+.campaignChestStage.is-opened .campaignChestLid {
+  top: -6px;
+  transform: rotateX(64deg) translateY(-20px);
+}
+
+.campaignChestStage.is-opened .campaignChestHandle {
+  pointer-events: none;
+}
+
+.campaignChestStage.is-error {
+  border-color: rgba(255, 90, 100, 0.38);
+}
+
+@keyframes chestRattle {
+  25% {
+    transform: translateX(calc(-50% - 2px)) rotate(-1deg);
+  }
+  50% {
+    transform: translateX(calc(-50% + 2px)) rotate(1deg);
+  }
+  75% {
+    transform: translateX(calc(-50% - 1px)) rotate(-0.5deg);
+  }
+}
+
+@keyframes rewardFlyOut {
+  0% {
+    opacity: 0;
+    transform: translateY(170px) scale(0.5) rotate(-8deg);
+  }
+  64% {
+    opacity: 1;
+    transform: translateY(-18px) scale(1.04) rotate(4deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes rewardFloatIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .rpsButtons button {
   flex: 1 1 0;
 }

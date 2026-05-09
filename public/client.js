@@ -63,6 +63,7 @@ const state = {
   campaignPanBound: false,
   campaignSuppressClickUntil: 0,
   campaignPanLayoutKey: "",
+  campaignChestModal: null,
   activeCampaignLevel: null,
 };
 
@@ -961,6 +962,83 @@ function campaignRulePoolForSingleplayer() {
   return unlocked.length ? unlocked : plan.basicRules;
 }
 
+function campaignRuleCardForId(ruleId) {
+  const rule = state.campaignRuleCatalog?.find((r) => r.id === ruleId);
+  if (!rule) {
+    return {
+      id: ruleId,
+      name: ruleNameById(ruleId),
+      description: "New rule unlocked.",
+      kind: "instant",
+      typeLabel: "Rule",
+      remaining: null,
+    };
+  }
+  return {
+    id: rule.id,
+    name: rule.name,
+    description: rule.description,
+    kind: rule.kind,
+    typeLabel: rule.typeLabel || (rule.kind === "instant" ? "Instant" : rule.kind === "delayed" ? `In ${rule.delayTurns || "?"} Turns` : `For ${rule.durationTurns || "?"} Turns`),
+    remaining: rule.kind === "duration" ? rule.durationTurns : rule.kind === "delayed" ? rule.delayTurns : null,
+  };
+}
+
+function renderCampaignChestRewards(ruleIds) {
+  if (!els.campaignChestRewards) return;
+  els.campaignChestRewards.innerHTML = "";
+  const rewards = uniqueStrings(ruleIds);
+  if (!rewards.length) {
+    const empty = document.createElement("div");
+    empty.className = "campaignChestEmptyReward";
+    empty.textContent = "Bonus chest";
+    els.campaignChestRewards.appendChild(empty);
+    return;
+  }
+  rewards.forEach((ruleId, index) => {
+    const reward = document.createElement("div");
+    reward.className = "campaignChestReward";
+    reward.style.setProperty("--i", String(index));
+    reward.appendChild(buildRuleCard(campaignRuleCardForId(ruleId), { pickable: false }));
+    els.campaignChestRewards.appendChild(reward);
+  });
+}
+
+function closeCampaignChestModal({ refresh = true } = {}) {
+  if (els.campaignChestModal) els.campaignChestModal.hidden = true;
+  if (els.campaignChestStage) {
+    els.campaignChestStage.classList.remove("is-opening", "is-opened", "is-error");
+    els.campaignChestStage.style.removeProperty("--handle-lift");
+  }
+  if (els.campaignChestRewards) els.campaignChestRewards.innerHTML = "";
+  if (els.campaignChestOkBtn) els.campaignChestOkBtn.hidden = true;
+  state.campaignChestModal = null;
+  if (refresh) renderCampaignMap();
+}
+
+function showCampaignChestModal(chestIndex) {
+  const catalog = state.campaignRuleCatalog || [];
+  const plan = buildCampaignRulePlan(catalog);
+  if (!state.campaign) loadCampaignProgress(plan);
+  const chestLevel = plan.chestLevels[chestIndex];
+  if (chestLevel == null || state.campaign.highestUnlockedLevel <= chestLevel || state.campaign.openedChests.includes(chestIndex)) return;
+  state.campaignChestModal = {
+    chestIndex,
+    opening: false,
+    opened: false,
+    startClientY: 0,
+    lift: 0,
+  };
+  if (els.campaignChestModal) els.campaignChestModal.hidden = false;
+  if (els.campaignChestStage) {
+    els.campaignChestStage.classList.remove("is-opening", "is-opened", "is-error");
+    els.campaignChestStage.style.setProperty("--handle-lift", "0px");
+  }
+  if (els.campaignChestRewards) els.campaignChestRewards.innerHTML = "";
+  if (els.campaignChestStatus) els.campaignChestStatus.textContent = `Chest ${chestIndex + 1}`;
+  if (els.campaignChestOkBtn) els.campaignChestOkBtn.hidden = true;
+}
+
 async function openCampaignChest(chestIndex, { auto = false } = {}) {
   const catalog = state.campaignRuleCatalog || [];
   const plan = buildCampaignRulePlan(catalog);
@@ -994,6 +1072,39 @@ async function openCampaignChest(chestIndex, { auto = false } = {}) {
     } else {
       els.campaignNotice.textContent = `${auto ? "Auto-opened chest" : "Opened chest"}: bonus chest (no new rules).`;
     }
+  }
+  return Array.isArray(json.rewards) ? json.rewards : [];
+}
+
+async function revealCampaignChest() {
+  const modalState = state.campaignChestModal;
+  if (!modalState || modalState.opening || modalState.opened) return;
+  modalState.opening = true;
+  if (els.campaignChestStage) els.campaignChestStage.classList.add("is-opening");
+  if (els.campaignChestStatus) els.campaignChestStatus.textContent = "Opening...";
+  try {
+    const rewards = await openCampaignChest(modalState.chestIndex);
+    modalState.opened = true;
+    modalState.rewards = rewards;
+    if (els.campaignChestStage) {
+      els.campaignChestStage.classList.remove("is-opening");
+      els.campaignChestStage.classList.add("is-opened");
+      els.campaignChestStage.style.setProperty("--handle-lift", "-44px");
+    }
+    renderCampaignChestRewards(rewards);
+    if (els.campaignChestStatus) {
+      els.campaignChestStatus.textContent = rewards?.length ? "Unlocked rules" : "Opened";
+    }
+    if (els.campaignChestOkBtn) els.campaignChestOkBtn.hidden = false;
+    if (els.profileModal && !els.profileModal.hidden) renderProfile();
+  } catch (err) {
+    modalState.opening = false;
+    if (els.campaignChestStage) {
+      els.campaignChestStage.classList.remove("is-opening");
+      els.campaignChestStage.classList.add("is-error");
+    }
+    if (els.campaignChestStatus) els.campaignChestStatus.textContent = err.message || "Failed to open chest.";
+    if (els.campaignChestOkBtn) els.campaignChestOkBtn.hidden = false;
   }
 }
 
@@ -1129,12 +1240,7 @@ function renderCampaignMap() {
     chest.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     chest.addEventListener("click", async () => {
       if (!campaignClickAllowed()) return;
-      try {
-        await openCampaignChest(chestIndex);
-        renderCampaignMap();
-      } catch (err) {
-        if (els.campaignNotice) els.campaignNotice.textContent = err.message || "Failed to open chest.";
-      }
+      showCampaignChestModal(chestIndex);
     });
     scene.appendChild(chest);
   }
@@ -2139,9 +2245,11 @@ async function adminSaveUser() {
     });
     const json = await res.json();
     if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to save user.");
-    setAdminStatus("Saved.");
+    const savedId = json.user?.id || user.id;
+    if (state.account?.id === savedId) await refreshAccount();
     await adminRefreshUsers();
-    adminSelectUser(user.id);
+    adminSelectUser(savedId);
+    setAdminStatus("Saved.");
   } catch (err) {
     setAdminStatus(err.message || "Failed to save user.");
   }
@@ -4953,6 +5061,31 @@ els.singleplayerBtn?.addEventListener("click", () => {
   openCampaignMap();
 });
 els.campaignBackBtn?.addEventListener("click", () => closeCampaignMap());
+els.campaignChestHandle?.addEventListener("pointerdown", (ev) => {
+  if (!state.campaignChestModal || state.campaignChestModal.opened || state.campaignChestModal.opening) return;
+  state.campaignChestModal.startClientY = ev.clientY;
+  state.campaignChestModal.lift = 0;
+  els.campaignChestHandle.setPointerCapture?.(ev.pointerId);
+});
+els.campaignChestHandle?.addEventListener("pointermove", (ev) => {
+  if (!state.campaignChestModal || state.campaignChestModal.opened || state.campaignChestModal.opening) return;
+  const lift = clamp(state.campaignChestModal.startClientY - ev.clientY, 0, 48);
+  state.campaignChestModal.lift = lift;
+  els.campaignChestStage?.style.setProperty("--handle-lift", `${-lift}px`);
+});
+els.campaignChestHandle?.addEventListener("pointerup", () => {
+  if (!state.campaignChestModal || state.campaignChestModal.opened || state.campaignChestModal.opening) return;
+  if ((state.campaignChestModal.lift || 0) >= 24) revealCampaignChest();
+  else els.campaignChestStage?.style.setProperty("--handle-lift", "0px");
+});
+els.campaignChestHandle?.addEventListener("click", () => {
+  if (!state.campaignChestModal || state.campaignChestModal.opened || state.campaignChestModal.opening) return;
+  revealCampaignChest();
+});
+els.campaignChestOkBtn?.addEventListener("click", () => closeCampaignChestModal({ refresh: true }));
+els.campaignChestModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.campaignChestModal && state.campaignChestModal?.opened) closeCampaignChestModal({ refresh: true });
+});
 
 els.createPublicBtn?.addEventListener("click", () => createLobby("public"));
 els.createPrivateBtn?.addEventListener("click", () => createLobby("private"));

@@ -40,17 +40,18 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   let userStore = { users: {}, sessions: {} };
   let userStoreWriteQueue = Promise.resolve();
   
-  function saveUsers(store) {
+  function saveUsers(store, options = {}) {
     if (!USE_DATABASE) {
       ensureDataDir();
       fs.writeFileSync(USERS_FILE, JSON.stringify(store, null, 2));
       return;
     }
     const snapshot = JSON.parse(JSON.stringify(store));
+    const writeOptions = JSON.parse(JSON.stringify(options || {}));
     userStoreWriteQueue = userStoreWriteQueue
-      .then(() => persistStoreSnapshot(snapshot))
+      .then(() => persistStoreChanges(snapshot, writeOptions))
       .catch((err) => {
-        console.error("persistStoreSnapshot failed", err);
+        console.error("persistStoreChanges failed", err);
       });
   }
   
@@ -86,6 +87,114 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     } finally {
       client.release();
     }
+  }
+
+  function usersByIds(store, ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
+    if (!wanted.size) return [];
+    return Object.values(store.users || {}).filter((user) => wanted.has(user?.id));
+  }
+
+  function sessionsByTokens(store, tokens) {
+    return (Array.isArray(tokens) ? tokens : [])
+      .filter((token) => token && store.sessions?.[token])
+      .map((token) => [token, store.sessions[token]]);
+  }
+
+  async function persistStoreChanges(store, options = {}) {
+    if (!USE_DATABASE) return;
+    if (options.fullSnapshot) {
+      await persistStoreSnapshot(store);
+      return;
+    }
+
+    const users = usersByIds(store, options.userIds);
+    const sessions = sessionsByTokens(store, options.sessionTokens);
+    const deleteUserIds = (Array.isArray(options.deleteUserIds) ? options.deleteUserIds : []).filter(Boolean);
+    const deleteSessionTokens = (Array.isArray(options.deleteSessionTokens) ? options.deleteSessionTokens : []).filter(Boolean);
+
+    if (!users.length && !sessions.length && !deleteUserIds.length && !deleteSessionTokens.length) return;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      if (deleteSessionTokens.length) {
+        await client.query("DELETE FROM app_sessions WHERE session_token = ANY($1::text[])", [deleteSessionTokens]);
+      }
+      if (deleteUserIds.length) {
+        await client.query("DELETE FROM app_sessions WHERE user_id = ANY($1::uuid[])", [deleteUserIds]);
+        await client.query("DELETE FROM app_users WHERE user_id = ANY($1::uuid[])", [deleteUserIds]);
+      }
+      for (const user of users) {
+        await client.query(
+          `INSERT INTO app_users (user_id, username_key, payload, created_at, updated_at)
+           VALUES ($1, $2, $3::jsonb, COALESCE(($3::jsonb->>'createdAt')::timestamptz, NOW()), NOW())
+           ON CONFLICT (user_id) DO UPDATE
+           SET username_key = EXCLUDED.username_key,
+               payload = EXCLUDED.payload,
+               updated_at = NOW()`,
+          [user.id, user.usernameKey, JSON.stringify(user)]
+        );
+      }
+      for (const [token, session] of sessions) {
+        await client.query(
+          `INSERT INTO app_sessions (session_token, user_id, payload, created_at)
+           VALUES ($1, $2, $3::jsonb, COALESCE(($3::jsonb->>'createdAt')::bigint, EXTRACT(EPOCH FROM NOW()) * 1000)::bigint)
+           ON CONFLICT (session_token) DO UPDATE
+           SET user_id = EXCLUDED.user_id,
+               payload = EXCLUDED.payload,
+               created_at = EXCLUDED.created_at`,
+          [token, session.userId, JSON.stringify(session)]
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function loadDatabaseUserByUsernameKey(key) {
+    if (!USE_DATABASE || !key) return null;
+    const result = await db.query("SELECT payload FROM app_users WHERE username_key = $1 LIMIT 1", [key]);
+    return result.rows[0]?.payload || null;
+  }
+
+  async function loadDatabaseUserById(userId) {
+    if (!USE_DATABASE || !userId) return null;
+    const result = await db.query("SELECT payload FROM app_users WHERE user_id = $1 LIMIT 1", [userId]);
+    return result.rows[0]?.payload || null;
+  }
+
+  async function refreshDatabaseUserByUsernameKey(key) {
+    const user = hydrateUser(await loadDatabaseUserByUsernameKey(key));
+    if (!user) return null;
+    if (user.usernameKey !== key && userStore.users[key]?.id === user.id) delete userStore.users[key];
+    userStore.users[user.usernameKey] = user;
+    return user;
+  }
+
+  async function refreshDatabaseUserById(userId) {
+    const user = hydrateUser(await loadDatabaseUserById(userId));
+    if (!user) return null;
+    for (const [key, existing] of Object.entries(userStore.users || {})) {
+      if (existing?.id === user.id && key !== user.usernameKey) delete userStore.users[key];
+    }
+    userStore.users[user.usernameKey] = user;
+    return user;
+  }
+
+  async function refreshDatabaseUsers() {
+    if (!USE_DATABASE) return;
+    const usersRes = await db.query("SELECT payload FROM app_users");
+    const users = {};
+    for (const row of usersRes.rows) {
+      const user = hydrateUser(row.payload);
+      if (user?.usernameKey) users[user.usernameKey] = user;
+    }
+    userStore.users = users;
   }
   
   async function initDatabaseStore() {
@@ -608,7 +717,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     hydrateUser(user);
     if (!user) return null;
     const achievementState = buildAchievementsForUser(user, { award: awardAchievements });
-    if (achievementState.awardedCoins > 0) saveUsers(userStore);
+    if (achievementState.awardedCoins > 0) saveUsers(userStore, { userIds: [user.id] });
     const tier = tierForRating(user.stats.rating);
     const winRate = user.stats.gamesCompleted ? Math.round((user.stats.wins / user.stats.gamesCompleted) * 100) : 0;
     const averageGameLength = user.stats.completedGameLengths ? Math.round(user.stats.totalGamePlies / user.stats.completedGameLengths) : 0;
@@ -670,7 +779,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   function createSession(userId) {
     const token = crypto.randomBytes(32).toString("hex");
     userStore.sessions[token] = { userId, createdAt: Date.now() };
-    saveUsers(userStore);
+    saveUsers(userStore, { sessionTokens: [token] });
     return token;
   }
   
@@ -706,7 +815,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     user.stats.gamesPlayed = (user.stats.gamesPlayed || 0) + 1;
     if (mode === "singleplayer") user.stats.singleplayerGames = (user.stats.singleplayerGames || 0) + 1;
     else user.stats.multiplayerGames = (user.stats.multiplayerGames || 0) + 1;
-    saveUsers(userStore);
+    saveUsers(userStore, { userIds: [user.id] });
   }
   
   function updateActivePlayerNames(user) {
@@ -802,9 +911,9 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       res.json({ ok: true, rules: cards });
     });
     
-    app.get("/api/users/:username/profile", (req, res) => {
+    app.get("/api/users/:username/profile", async (req, res) => {
       const key = usernameKey(req.params.username);
-      const user = userStore.users[key];
+      const user = USE_DATABASE ? await refreshDatabaseUserByUsernameKey(key) : userStore.users[key];
       if (!user) return res.status(404).json({ ok: false, error: "Player not found." });
       const profile = publicUser(user, { awardAchievements: false });
       delete profile.isAdmin;
@@ -837,7 +946,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         campaign: createDefaultCampaignProgress(buildCampaignRulePlan()),
       };
       userStore.users[key] = user;
-      saveUsers(userStore);
+      saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
     
       const token = createSession(user.id);
@@ -847,7 +956,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     
     app.post("/api/auth/login", async (req, res) => {
       const key = usernameKey(req.body?.username);
-      const user = userStore.users[key];
+      const user = USE_DATABASE ? await refreshDatabaseUserByUsernameKey(key) : userStore.users[key];
       if (!user || !verifyPassword(req.body?.password || "", user)) {
         return res.status(401).json({ ok: false, error: "Username or password is wrong." });
       }
@@ -860,7 +969,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       const token = authTokenFromReq(req) || req.body?.token;
       if (token && userStore.sessions[token]) {
         delete userStore.sessions[token];
-        saveUsers(userStore);
+        saveUsers(userStore, { deleteSessionTokens: [token] });
         await flushUserStoreWrites();
       }
       res.json({ ok: true });
@@ -904,7 +1013,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       }
       updateActivePlayerNames(user);
     
-      saveUsers(userStore);
+      saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
       res.json({ ok: true, user: publicUser(user) });
     });
@@ -923,7 +1032,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     
       if (action === "reset") {
         user.campaign = createDefaultCampaignProgress(plan);
-        saveUsers(userStore);
+        saveUsers(userStore, { userIds: [user.id] });
         await flushUserStoreWrites();
         return res.json({ ok: true, campaign: user.campaign, user: publicUser(user) });
       }
@@ -931,7 +1040,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       if (action === "openChest") {
         const result = openCampaignChestForUser(user, req.body?.chestIndex, plan);
         if (!result.ok) return res.status(400).json(result);
-        saveUsers(userStore);
+        saveUsers(userStore, { userIds: [user.id] });
         await flushUserStoreWrites();
         return res.json({ ok: true, campaign: result.campaign, rewards: result.rewards || [], user: publicUser(user) });
       }
@@ -962,7 +1071,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         user.stats.coinsSpent += item.price;
       }
       user.cosmetics[group] = [...new Set([...(user.cosmetics[group] || []), name])];
-      saveUsers(userStore);
+      saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
       res.json({ ok: true, user: publicUser(user), bought: { group, name, price: item.price } });
     });
@@ -977,7 +1086,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       const next = hashPassword(nextPassword);
       user.salt = next.salt;
       user.passwordHash = next.hash;
-      saveUsers(userStore);
+      saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
       res.json({ ok: true });
     });
@@ -991,7 +1100,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       const friend = userStore.users[usernameKey(friendName)];
       if (!friend) return res.status(404).json({ ok: false, error: "Player not found." });
       if (!user.social.friends.includes(friend.username)) user.social.friends.push(friend.username);
-      saveUsers(userStore);
+      saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
       res.json({ ok: true, user: publicUser(user) });
     });
@@ -999,18 +1108,23 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     app.delete("/api/me", async (req, res) => {
       const user = authedUser(req, res);
       if (!user) return;
+      const deletedSessionTokens = [];
       for (const [token, session] of Object.entries(userStore.sessions || {})) {
-        if (session.userId === user.id) delete userStore.sessions[token];
+        if (session.userId === user.id) {
+          deletedSessionTokens.push(token);
+          delete userStore.sessions[token];
+        }
       }
       delete userStore.users[user.usernameKey];
-      saveUsers(userStore);
+      saveUsers(userStore, { deleteUserIds: [user.id], deleteSessionTokens: deletedSessionTokens });
       await flushUserStoreWrites();
       res.json({ ok: true });
     });
     
-    app.get("/api/admin/users", (req, res) => {
+    app.get("/api/admin/users", async (req, res) => {
       const admin = adminUser(req, res);
       if (!admin) return;
+      await refreshDatabaseUsers();
       const users = Object.values(userStore.users || {}).map((u) => sanitizeAdminUserPayload(u));
       users.sort((a, b) => String(a.username || "").localeCompare(String(b.username || ""), undefined, { sensitivity: "base" }));
       res.json({ ok: true, users });
@@ -1019,89 +1133,40 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     app.patch("/api/admin/users/:id", async (req, res) => {
       const admin = adminUser(req, res);
       if (!admin) return;
-      const target = userById(req.params.id);
+      const target = USE_DATABASE ? await refreshDatabaseUserById(req.params.id) : userById(req.params.id);
       if (!target) return res.status(404).json({ ok: false, error: "User not found." });
       hydrateUser(target);
     
       const incoming = req.body?.user;
       if (!incoming || typeof incoming !== "object") return res.status(400).json({ ok: false, error: "Missing user payload." });
-    
-      if (typeof incoming.username === "string") {
-        const validation = validateSignup(incoming.username, "0000");
-        if (!validation.ok) return res.status(400).json({ ok: false, error: validation.error.replace("Password must be at least 4 characters.", "Invalid username.") });
-        const nextKey = usernameKey(validation.username);
-        if (nextKey !== target.usernameKey && userStore.users[nextKey] && userStore.users[nextKey].id !== target.id) {
-          return res.status(409).json({ ok: false, error: "Username is already taken." });
-        }
-        if (nextKey !== target.usernameKey) {
-          delete userStore.users[target.usernameKey];
-          target.username = validation.username;
-          target.usernameKey = nextKey;
-          userStore.users[nextKey] = target;
-          updateActivePlayerNames(target);
-        }
+
+      const validation = validateSignup(typeof incoming.username === "string" ? incoming.username : target.username, "0000");
+      if (!validation.ok) return res.status(400).json({ ok: false, error: validation.error.replace("Password must be at least 4 characters.", "Invalid username.") });
+      const nextKey = usernameKey(validation.username);
+      if (nextKey !== target.usernameKey && userStore.users[nextKey] && userStore.users[nextKey].id !== target.id) {
+        return res.status(409).json({ ok: false, error: "Username is already taken." });
       }
-    
-      if (incoming.isAdmin != null) target.isAdmin = !!incoming.isAdmin;
-    
-      if (incoming.stats && typeof incoming.stats === "object") {
-        const allowed = Object.keys(defaultStats());
-        let ratingUpdated = false;
-        for (const k of allowed) {
-          if (!(k in incoming.stats)) continue;
-          const v = Number(incoming.stats[k]);
-          if (!Number.isFinite(v)) continue;
-          target.stats[k] = Math.max(0, Math.round(v));
-          if (k === "rating") ratingUpdated = true;
-        }
-        if (ratingUpdated) {
-          target.stats.peakRating = Math.max(target.stats.peakRating || 0, target.stats.rating);
-        }
-      }
-    
-      if (incoming.profile && typeof incoming.profile === "object") {
-        const p = incoming.profile;
-        if (typeof p.country === "string") target.profile.country = p.country.trim().slice(0, 32);
-        if (typeof p.bio === "string") target.profile.bio = p.bio.trim().slice(0, 160);
-        if (typeof p.onlineStatus === "string") target.profile.onlineStatus = p.onlineStatus.trim().slice(0, 32) || "Online";
-        if (typeof p.customAvatar === "string") target.profile.customAvatar = p.customAvatar.trim().slice(0, 4) || target.profile.customAvatar;
-        for (const [group, field] of Object.entries(COSMETIC_PROFILE_FIELDS)) {
-          if (typeof p[field] !== "string") continue;
-          const result = setProfileCosmetic(target, group, p[field]);
-          if (!result.ok) return res.status(400).json(result);
-        }
-        updateActivePlayerNames(target);
-      }
-    
-      if (incoming.cosmetics && typeof incoming.cosmetics === "object") {
-        const next = {};
-        for (const [group, items] of Object.entries(incoming.cosmetics)) {
-          if (!COSMETIC_CATALOG[group]) continue;
-          if (!Array.isArray(items)) continue;
-          next[group] = [...new Set(items.map((x) => String(x)).filter(Boolean))].slice(0, 200);
-        }
-        target.cosmetics = { ...(target.cosmetics || {}), ...next };
-      }
-    
-      if (incoming.social && typeof incoming.social === "object") {
-        const social = incoming.social;
-        if (Array.isArray(social.friends)) target.social.friends = [...new Set(social.friends.map((x) => normalizeUsername(x)).filter(Boolean))].slice(0, 200);
-        if (Array.isArray(social.rivals)) target.social.rivals = [...new Set(social.rivals.map((x) => normalizeUsername(x)).filter(Boolean))].slice(0, 200);
-        if (Array.isArray(social.clubs)) target.social.clubs = [...new Set(social.clubs.map((x) => String(x).trim().slice(0, 32)).filter(Boolean))].slice(0, 200);
-      }
-    
-      if (Array.isArray(incoming.matchHistory)) {
-        target.matchHistory = incoming.matchHistory.slice(0, 50);
-      }
-    
-      if (incoming.ruleCollection && typeof incoming.ruleCollection === "object") {
-        target.ruleCollection = incoming.ruleCollection;
-      }
-    
-      hydrateUser(target);
-      saveUsers(userStore);
+
+      const originalKey = target.usernameKey;
+      const nextUser = {
+        ...JSON.parse(JSON.stringify(target)),
+        ...JSON.parse(JSON.stringify(incoming)),
+        id: target.id,
+        username: validation.username,
+        usernameKey: nextKey,
+        salt: target.salt,
+        passwordHash: target.passwordHash,
+      };
+      if (!nextUser.createdAt) nextUser.createdAt = target.createdAt || new Date().toISOString();
+
+      hydrateUser(nextUser);
+      if (originalKey !== nextUser.usernameKey) delete userStore.users[originalKey];
+      userStore.users[nextUser.usernameKey] = nextUser;
+      updateActivePlayerNames(nextUser);
+
+      saveUsers(userStore, { userIds: [nextUser.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: sanitizeAdminUserPayload(target) });
+      res.json({ ok: true, user: sanitizeAdminUserPayload(nextUser) });
     });
     
     app.get("/api/admin/flags", (req, res) => {

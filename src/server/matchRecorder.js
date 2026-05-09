@@ -133,7 +133,7 @@ function createMatchRecorder({
       changedUsers.add(user.id);
     }
   
-    if (changedUsers.size) saveUsers(getUserStore());
+    if (changedUsers.size) saveUsers(getUserStore(), { userIds: [...changedUsers] });
   }
 
   return { recordMatchIfNeeded };

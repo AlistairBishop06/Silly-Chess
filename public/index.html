@@ -82,6 +82,25 @@
             <div id="campaignNotice" class="hint"></div>
           </div>
 
+          <div id="campaignChestModal" class="modal" hidden>
+            <div class="modalCard campaignChestCard">
+              <div class="modalTitle">Chest</div>
+              <div class="campaignChestStage" id="campaignChestStage">
+                <div class="campaignChestBox" id="campaignChestBox" aria-hidden="true">
+                  <div class="campaignChestGlow"></div>
+                  <div class="campaignChestLid"></div>
+                  <button id="campaignChestHandle" class="campaignChestHandle" type="button" aria-label="Open chest"></button>
+                  <div class="campaignChestBase"></div>
+                </div>
+                <div id="campaignChestRewards" class="campaignChestRewards"></div>
+              </div>
+              <div id="campaignChestStatus" class="modalStatus">Lift the handle to open it.</div>
+              <div class="modalActions">
+                <button id="campaignChestOkBtn" class="primaryBtn" type="button" hidden>OK</button>
+              </div>
+            </div>
+          </div>
+
           <div class="panel" id="gamePanel" hidden>
             <div class="gameHeader">
               <div class="gameIdentity">
