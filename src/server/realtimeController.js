@@ -6,16 +6,22 @@ const { allRules } = require("./game/rules/ruleset");
 function createRealtimeController({ io, runtimeFlags, accountService, recordMatchIfNeeded }) {
   const {
     accountFromPayload,
+    addNotification,
+    areFriends,
     applyAccountToPlayer,
     ensureCampaignProgress,
+    flushUserStoreWrites,
     hydrateUser,
     recordGameStarted,
+    saveUsers,
     uniqueStrings,
     userById,
   } = accountService;
 
   /** roomCode -> { room, socketsByPlayerId } */
   const rooms = new Map();
+  const onlineUsers = new Map(); // userId -> { socketId, username }
+  const challengeInvites = new Map(); // inviteId -> { fromUserId, toUserId, createdAt }
   const botController = createBotController({ rooms, pushEffectsAndState });
   const { scheduleBotTurn } = botController;
   
@@ -139,6 +145,30 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
   function emitOpenServers() {
     io.emit("lobby:openServers", { servers: getOpenPublicServers() });
   }
+
+  function activeRoomForUser(userId) {
+    if (!userId) return null;
+    for (const entry of rooms.values()) {
+      const player = (entry.room.players || []).find((p) => p.userId === userId && !!p.socketId);
+      if (player) return entry.room;
+    }
+    return null;
+  }
+
+  function userAvailableForChallenge(userId) {
+    const online = onlineUsers.get(userId);
+    if (!online?.socketId || !io.sockets.sockets.get(online.socketId)) return false;
+    return !activeRoomForUser(userId);
+  }
+
+  function sendSocialState(user) {
+    if (!user?.id) return;
+    const online = onlineUsers.get(user.id);
+    if (!online?.socketId) return;
+    io.to(online.socketId).emit("social:state", {
+      notifications: accountService.publicUser(user).social?.notifications || [],
+    });
+  }
   
   
   function removeRoom(code, entry) {
@@ -163,6 +193,15 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
   }
   
   io.on("connection", (socket) => {
+    socket.on("social:identify", ({ authToken } = {}, cb) => {
+      const account = accountFromPayload({ authToken });
+      if (!account) return cb?.({ ok: false, error: "Sign in first." });
+      socket.data.userId = account.id;
+      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
+      cb?.({ ok: true });
+      sendSocialState(account);
+    });
+
     socket.on("game:sync", ({ code, playerId } = {}, cb) => {
       const entry = rooms.get(code);
       if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
@@ -215,6 +254,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("lobby:create", ({ authToken, visibility } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in before creating a server." });
+      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
       const code = createLobbyCode((c) => rooms.has(c));
       const room = createRoom(code, { visibility });
       room.game = new Game({ roomCode: code, debugMode: runtimeFlags.debugMode });
@@ -234,6 +274,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("lobby:singleplayer", ({ authToken, rulePoolIds, campaignLevel } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in before starting singleplayer." });
+      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
       const code = createLobbyCode((c) => rooms.has(c));
       const room = createRoom(code, { visibility: "private" });
       const knownRuleIds = new Set(allRules().map((rule) => rule.id));
@@ -289,6 +330,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("lobby:join", ({ code, authToken } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in before joining a server." });
+      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
       const entry = rooms.get(code);
       if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
       const room = entry.room;
@@ -366,6 +408,79 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
 
     for (const [event, action] of Object.entries(gameActions)) registerGameAction(event, action);
 
+    socket.on("social:challenge", ({ authToken, username } = {}, cb) => {
+      const challenger = accountFromPayload({ authToken });
+      if (!challenger) return cb?.({ ok: false, error: "Sign in first." });
+      const targetName = String(username || "").trim();
+      const target = Object.values(accountService.userStore.users || {}).find(
+        (u) => u?.usernameKey === String(targetName).toLowerCase().trim()
+      );
+      if (!target) return cb?.({ ok: false, error: "Player not found." });
+      hydrateUser(target);
+      if (target.id === challenger.id) return cb?.({ ok: false, error: "You cannot challenge yourself." });
+      if (!areFriends(challenger, target)) return cb?.({ ok: false, error: "You can only challenge friends." });
+      if (!userAvailableForChallenge(challenger.id)) return cb?.({ ok: false, error: "You are already in a game or lobby." });
+      if (!userAvailableForChallenge(target.id)) return cb?.({ ok: false, error: "That player is not available right now." });
+
+      const inviteId = `C${Date.now().toString(36)}${Math.floor(Math.random() * 100000).toString(36)}`;
+      challengeInvites.set(inviteId, { fromUserId: challenger.id, toUserId: target.id, createdAt: Date.now() });
+      const targetOnline = onlineUsers.get(target.id);
+      io.to(targetOnline.socketId).emit("social:challenge", {
+        id: inviteId,
+        fromUserId: challenger.id,
+        fromUsername: challenger.username,
+        message: `${challenger.username} challenged you to a game.`,
+      });
+      cb?.({ ok: true });
+    });
+
+    socket.on("social:challengeResponse", ({ authToken, challengeId, accepted } = {}, cb) => {
+      const target = accountFromPayload({ authToken });
+      if (!target) return cb?.({ ok: false, error: "Sign in first." });
+      const invite = challengeInvites.get(challengeId);
+      if (!invite || invite.toUserId !== target.id) return cb?.({ ok: false, error: "Challenge not found." });
+      challengeInvites.delete(challengeId);
+      const challenger = userById(invite.fromUserId);
+      if (!challenger) return cb?.({ ok: false, error: "Challenger not found." });
+      hydrateUser(challenger);
+
+      const challengerOnline = onlineUsers.get(challenger.id);
+      const targetOnline = onlineUsers.get(target.id);
+      if (!accepted) {
+        if (challengerOnline?.socketId) {
+          io.to(challengerOnline.socketId).emit("social:challengeDeclined", { fromUsername: target.username });
+        }
+        return cb?.({ ok: true });
+      }
+      if (!userAvailableForChallenge(challenger.id) || !userAvailableForChallenge(target.id)) {
+        return cb?.({ ok: false, error: "Both players must be online and outside a game." });
+      }
+
+      const code = createLobbyCode((c) => rooms.has(c));
+      const room = createRoom(code, { visibility: "private" });
+      room.game = new Game({ roomCode: code, debugMode: runtimeFlags.debugMode });
+      rooms.set(code, { room, socketsByPlayerId: new Map() });
+      const entry = rooms.get(code);
+
+      const white = room.addPlayer(challengerOnline.socketId, challenger.username);
+      applyAccountToPlayer(white, challenger);
+      const black = room.addPlayer(targetOnline.socketId, target.username);
+      applyAccountToPlayer(black, target);
+      io.sockets.sockets.get(challengerOnline.socketId)?.join(code);
+      io.sockets.sockets.get(targetOnline.socketId)?.join(code);
+      entry.socketsByPlayerId.set(white.id, white.socketId);
+      entry.socketsByPlayerId.set(black.id, black.socketId);
+      recordGameStarted(challenger, "multiplayer");
+      recordGameStarted(target, "multiplayer");
+      room.game.start(room.players);
+
+      io.to(white.socketId).emit("lobby:challengeStarted", { ok: true, code, playerId: white.id, color: white.color });
+      io.to(black.socketId).emit("lobby:challengeStarted", { ok: true, code, playerId: black.id, color: black.color });
+      cb?.({ ok: true });
+      pushEffectsAndState(code);
+      emitOpenServers();
+    });
+
     socket.on("game:emote", (payload = {}, cb) => {
       withGamePlayer(payload, cb, ({ code, entry, playerId }) => {
         const player = entry.room.players.find((p) => p.id === playerId);
@@ -381,6 +496,9 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     });
 
     socket.on("disconnect", () => {
+      if (socket.data?.userId && onlineUsers.get(socket.data.userId)?.socketId === socket.id) {
+        onlineUsers.delete(socket.data.userId);
+      }
       for (const [code, entry] of rooms.entries()) {
         const room = entry.room;
         const player = room.players.find((p) => p.socketId === socket.id);

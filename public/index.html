@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chaos Chess</title>
-    <link rel="stylesheet" href="style.css?v=20260510" />
+    <link rel="stylesheet" href="style.css?v=20260510-social" />
   </head>
   <body>
     <div id="app">
@@ -15,6 +15,10 @@
         </div>
         <div class="topbarRight">
           <div id="status" class="status">Not connected</div>
+          <button id="notificationsBtn" class="bellBtn" type="button" aria-label="Notifications" title="Notifications">
+            <span class="bellIcon" aria-hidden="true">♢</span>
+            <span id="notificationsBadge" class="notificationsBadge" hidden>0</span>
+          </button>
           <button id="profileBtn" class="profileBtn" type="button">Sign in</button>
                           <button id="shopBtn" type="button">Shop</button>
         </div>
@@ -359,6 +363,18 @@
       </div>
     </div>
 
+    <div id="notificationsModal" class="modal" hidden>
+      <div class="modalCard notificationsCard">
+        <div class="cardsHeader">
+          <h3>Notifications</h3>
+          <div class="rulebookActions">
+            <button id="notificationsCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div id="notificationsList" class="notificationsList"></div>
+      </div>
+    </div>
+
     <div id="rulebookModal" class="modal" hidden>
       <div class="modalCard rulebookCard">
         <div class="cardsHeader">
@@ -425,10 +441,10 @@
     <script src="js/constants.js?v=20260508"></script>
     <script src="js/board-geometry.js?v=20260510"></script>
     <script src="js/card-fx.js?v=20260508"></script>
-    <script src="js/dom.js?v=20260510"></script>
+    <script src="js/dom.js?v=20260510-social"></script>
     <script src="js/draggable-modals.js?v=20260508"></script>
     <script src="js/realtime.js?v=20260508"></script>
     <script src="js/storage.js?v=20260508"></script>
-    <script src="client.js?v=20260510"></script>
+    <script src="client.js?v=20260510-social2"></script>
   </body>
 </html>

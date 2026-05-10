@@ -399,8 +399,62 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     user.social.friends = Array.isArray(user.social.friends) ? user.social.friends : [];
     user.social.rivals = Array.isArray(user.social.rivals) ? user.social.rivals : [];
     user.social.clubs = Array.isArray(user.social.clubs) ? user.social.clubs : [];
+    user.social.notifications = Array.isArray(user.social.notifications) ? user.social.notifications : [];
     user.campaign = normalizeCampaignProgress(user.campaign, buildCampaignRulePlan());
     return user;
+  }
+
+  function notificationId() {
+    return `N${Date.now().toString(36)}${crypto.randomBytes(4).toString("hex")}`;
+  }
+
+  function publicNotifications(user) {
+    hydrateUser(user);
+    return (user.social.notifications || [])
+      .filter((n) => n && typeof n === "object")
+      .slice()
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 60)
+      .map((n) => ({
+        id: n.id,
+        type: n.type,
+        fromUserId: n.fromUserId || null,
+        fromUsername: n.fromUsername || "Player",
+        message: n.message || "",
+        createdAt: n.createdAt || Date.now(),
+      }));
+  }
+
+  function addNotification(user, notification) {
+    hydrateUser(user);
+    user.social.notifications = [
+      {
+        id: notification.id || notificationId(),
+        createdAt: Date.now(),
+        ...notification,
+      },
+      ...(user.social.notifications || []),
+    ].slice(0, 80);
+  }
+
+  function removeNotification(user, notificationIdValue) {
+    hydrateUser(user);
+    const before = user.social.notifications.length;
+    user.social.notifications = user.social.notifications.filter((n) => n?.id !== notificationIdValue);
+    return user.social.notifications.length !== before;
+  }
+
+  function areFriends(a, b) {
+    hydrateUser(a);
+    hydrateUser(b);
+    return (a.social.friends || []).some((name) => usernameKey(name) === b.usernameKey);
+  }
+
+  function addMutualFriend(a, b) {
+    hydrateUser(a);
+    hydrateUser(b);
+    if (!areFriends(a, b)) a.social.friends.push(b.username);
+    if (!areFriends(b, a)) b.social.friends.push(a.username);
   }
   
   function tierForRating(rating) {
@@ -705,6 +759,23 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       cardBack: p.cardBack || "Classic Cards",
     };
   }
+
+  function publicSocial(user) {
+    hydrateUser(user);
+    const friends = user.social?.friends || [];
+    const friendProfiles = friends.map((name) => {
+      const friend = userStore.users[usernameKey(name)];
+      if (!friend) return { username: name, profile: null };
+      return { username: friend.username, profile: publicProfile(friend) };
+    });
+    return {
+      friends,
+      friendProfiles,
+      rivals: user.social?.rivals || [],
+      clubs: user.social?.clubs || [],
+      notifications: publicNotifications(user),
+    };
+  }
   
   function applyAccountToPlayer(player, account) {
     if (!player || !account) return;
@@ -759,7 +830,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       campaign: user.campaign,
       achievements: achievementState.achievements,
       cosmetics: cosmeticInventory(user),
-      social: user.social,
+      social: publicSocial(user),
       insights: performanceInsights(user),
     };
   }
@@ -918,6 +989,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       const profile = publicUser(user, { awardAchievements: false });
       delete profile.isAdmin;
       delete profile.cosmetics;
+      if (profile.social) delete profile.social.notifications;
       res.json({ ok: true, user: profile });
     });
     
@@ -942,7 +1014,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         ruleCollection: {},
         achievementRewards: {},
         cosmetics: {},
-        social: { friends: [], rivals: [], clubs: [] },
+        social: { friends: [], rivals: [], clubs: [], notifications: [] },
         campaign: createDefaultCampaignProgress(buildCampaignRulePlan()),
       };
       userStore.users[key] = user;
@@ -1099,10 +1171,77 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       if (usernameKey(friendName) === user.usernameKey) return res.status(400).json({ ok: false, error: "You cannot add yourself." });
       const friend = userStore.users[usernameKey(friendName)];
       if (!friend) return res.status(404).json({ ok: false, error: "Player not found." });
-      if (!user.social.friends.includes(friend.username)) user.social.friends.push(friend.username);
-      saveUsers(userStore, { userIds: [user.id] });
+      hydrateUser(friend);
+      if (areFriends(user, friend)) return res.json({ ok: true, user: publicUser(user), alreadyFriends: true });
+      const existing = (friend.social.notifications || []).find(
+        (n) => n?.type === "friendRequest" && n.fromUserId === user.id
+      );
+      if (!existing) {
+        addNotification(friend, {
+          type: "friendRequest",
+          fromUserId: user.id,
+          fromUsername: user.username,
+          message: `${user.username} sent you a friend request.`,
+        });
+      }
+      saveUsers(userStore, { userIds: [friend.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, user: publicUser(user), requested: true });
+    });
+
+    app.delete("/api/me/friends/:username", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const friendKey = usernameKey(req.params.username);
+      const friend = Object.values(userStore.users || {}).find((u) => u?.usernameKey === friendKey);
+      if (!friend) return res.status(404).json({ ok: false, error: "Player not found." });
+      hydrateUser(friend);
+      user.social.friends = (user.social.friends || []).filter((name) => usernameKey(name) !== friend.usernameKey);
+      friend.social.friends = (friend.social.friends || []).filter((name) => usernameKey(name) !== user.usernameKey);
+      saveUsers(userStore, { userIds: [user.id, friend.id] });
       await flushUserStoreWrites();
       res.json({ ok: true, user: publicUser(user) });
+    });
+
+    app.get("/api/me/notifications", (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      res.json({ ok: true, notifications: publicNotifications(user), user: publicUser(user) });
+    });
+
+    app.post("/api/me/notifications/:id/accept", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const note = (user.social.notifications || []).find((n) => n?.id === req.params.id);
+      if (!note) return res.status(404).json({ ok: false, error: "Notification not found." });
+      if (note.type !== "friendRequest") return res.status(400).json({ ok: false, error: "That notification cannot be accepted here." });
+      const sender = userById(note.fromUserId);
+      if (!sender) {
+        removeNotification(user, note.id);
+        saveUsers(userStore, { userIds: [user.id] });
+        await flushUserStoreWrites();
+        return res.status(404).json({ ok: false, error: "That player no longer exists." });
+      }
+      addMutualFriend(user, sender);
+      removeNotification(user, note.id);
+      addNotification(sender, {
+        type: "friendAccepted",
+        fromUserId: user.id,
+        fromUsername: user.username,
+        message: `${user.username} accepted your friend request.`,
+      });
+      saveUsers(userStore, { userIds: [user.id, sender.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, user: publicUser(user), notifications: publicNotifications(user) });
+    });
+
+    app.delete("/api/me/notifications/:id", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      removeNotification(user, req.params.id);
+      saveUsers(userStore, { userIds: [user.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, notifications: publicNotifications(user), user: publicUser(user) });
     });
     
     app.delete("/api/me", async (req, res) => {
@@ -1185,6 +1324,8 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
 
   return {
     accountFromPayload,
+    addNotification,
+    areFriends,
     applyAccountToPlayer,
     completeCampaignLevelForUser,
     ensureCampaignProgress,

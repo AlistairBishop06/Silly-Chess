@@ -7,6 +7,11 @@
     return {
       status: byId("status"),
       profileBtn: byId("profileBtn"),
+      notificationsBtn: byId("notificationsBtn"),
+      notificationsBadge: byId("notificationsBadge"),
+      notificationsModal: byId("notificationsModal"),
+      notificationsCloseBtn: byId("notificationsCloseBtn"),
+      notificationsList: byId("notificationsList"),
       accountSummary: byId("accountSummary"),
       accountActionBtn: byId("accountActionBtn"),
       authModal: byId("authModal"),

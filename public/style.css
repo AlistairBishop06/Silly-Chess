@@ -230,6 +230,76 @@ h3 {
   font-weight: 780;
 }
 
+.bellBtn {
+  position: relative;
+  width: 38px;
+  min-height: 36px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-color: rgba(255, 209, 102, 0.28);
+  background: rgba(255, 209, 102, 0.1);
+  box-shadow: none;
+}
+
+.bellBtn.hasNotifications {
+  border-color: rgba(255, 79, 139, 0.62);
+  background: rgba(255, 79, 139, 0.16);
+}
+
+.bellIcon {
+  position: relative;
+  width: 17px;
+  height: 18px;
+  border: 2px solid rgba(249, 251, 255, 0.9);
+  border-bottom: 0;
+  border-radius: 9px 9px 5px 5px;
+}
+
+.bellIcon::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -5px;
+  width: 6px;
+  height: 5px;
+  border: 2px solid rgba(249, 251, 255, 0.9);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  transform: translateX(-50%);
+}
+
+.bellIcon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(249, 251, 255, 0.9);
+  transform: translateX(-50%);
+}
+
+.notificationsBadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #111827;
+  border-radius: 999px;
+  color: #fff;
+  background: #ff2f4f;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1;
+  padding: 0 4px;
+  box-shadow: 0 8px 18px rgba(255, 47, 79, 0.36);
+}
+
 .miniAvatar {
   flex: 0 0 auto;
   width: 24px;
@@ -2384,6 +2454,47 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   touch-action: none;
 }
 
+.notificationsCard {
+  width: min(520px, calc(100vw - 28px));
+}
+
+.notificationsList {
+  display: grid;
+  gap: 9px;
+}
+
+.notificationItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 10px;
+}
+
+.notificationItem strong,
+.notificationItem span {
+  display: block;
+}
+
+.notificationItem span {
+  margin-top: 3px;
+  color: rgba(249, 251, 255, 0.72);
+  font-size: 13px;
+}
+
+.notificationActions {
+  display: flex;
+  gap: 7px;
+}
+
+.notificationActions button {
+  min-height: 32px;
+  padding: 6px 9px;
+}
+
 .modalCard.is-dragging .cardsHeader,
 .modalCard.is-dragging .modalTitle {
   cursor: grabbing;
@@ -3576,15 +3687,83 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   gap: 8px;
 }
 
-.friendList div {
+.socialSection {
+  gap: 10px;
+}
+
+.socialHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.socialHeader h3 {
+  margin: 0;
+}
+
+.socialHeader span,
+.socialHeader strong {
+  color: rgba(249, 251, 255, 0.66);
+  font-size: 12px;
+}
+
+.friendItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.06);
-  padding: 9px 10px;
+  padding: 8px;
+}
+
+.friendProfileBtn {
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  text-align: left;
+}
+
+.friendProfileBtn .miniAvatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.friendProfileBtn .miniAvatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.friendProfileBtn:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+.friendName {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(249, 251, 255, 0.9);
+  font-size: 13px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+}
+
+.friendActions {
+  display: flex;
+  gap: 7px;
 }
 
 .friendList span {

@@ -44,6 +44,7 @@ const state = {
   nextAdAt: 0,
   authToken: null,
   account: null,
+  notifications: [],
   authMode: "login",
   profileTab: "overview",
   profileRulesTab: "multiplayer",
@@ -1394,6 +1395,7 @@ function loadAccountSession() {
   const saved = window.ChaosChessStorage.loadAccountSession();
   if (saved.token) state.authToken = saved.token;
   if (saved.user) state.account = saved.user;
+  state.notifications = saved.user?.social?.notifications || [];
 }
 
 function saveAccountSession() {
@@ -1407,6 +1409,11 @@ function authHeaders() {
   return state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {};
 }
 
+function identifySocialSocket() {
+  if (!state.authToken || !state.connected) return;
+  socket.emit("social:identify", { authToken: state.authToken }, () => {});
+}
+
 async function refreshAccount() {
   if (!state.authToken) {
     state.account = null;
@@ -1418,10 +1425,13 @@ async function refreshAccount() {
     const json = await res.json();
     if (!res.ok || !json?.ok) throw new Error(json?.error || "Not signed in.");
     state.account = json.user;
+    state.notifications = json.user?.social?.notifications || [];
     saveAccountSession();
+    identifySocialSocket();
   } catch {
     state.authToken = null;
     state.account = null;
+    state.notifications = [];
     saveAccountSession();
   }
   renderAccountUI();
@@ -1434,6 +1444,92 @@ function renderAccountUI() {
   if (els.accountSummary) els.accountSummary.textContent = signedIn ? `Playing as ${user.username}` : "Sign up or log in to play.";
   if (els.accountActionBtn) els.accountActionBtn.textContent = signedIn ? "Profile" : "Sign in";
   if (els.profileBtn) els.profileBtn.textContent = signedIn ? user.username : "Sign in";
+  renderNotificationBadge();
+}
+
+function renderNotificationBadge() {
+  const count = (state.notifications || state.account?.social?.notifications || []).length;
+  if (!els.notificationsBtn) return;
+  els.notificationsBtn.hidden = !state.account;
+  if (els.notificationsBadge) {
+    els.notificationsBadge.hidden = count <= 0;
+    els.notificationsBadge.textContent = count > 99 ? "99+" : String(count);
+  }
+  els.notificationsBtn.classList.toggle("hasNotifications", count > 0);
+}
+
+async function loadNotifications() {
+  if (!state.authToken) return;
+  const res = await fetch("/api/me/notifications", { headers: authHeaders(), cache: "no-store" });
+  const json = await res.json();
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "Could not load notifications.");
+  state.notifications = json.notifications || [];
+  if (json.user) state.account = json.user;
+  saveAccountSession();
+  renderAccountUI();
+}
+
+function renderNotifications() {
+  const list = els.notificationsList;
+  if (!list) return;
+  const notes = state.notifications || [];
+  list.innerHTML = notes.length
+    ? notes
+        .map((n) => {
+          const actions =
+            n.type === "friendRequest"
+              ? `<button class="acceptNotificationBtn primaryBtn" data-note-id="${escapeAttr(n.id)}" type="button">Accept</button>
+                 <button class="dismissNotificationBtn" data-note-id="${escapeAttr(n.id)}" type="button">Dismiss</button>`
+              : `<button class="dismissNotificationBtn" data-note-id="${escapeAttr(n.id)}" type="button">Dismiss</button>`;
+          return `<div class="notificationItem">
+            <div>
+              <strong>${escapeHtml(n.fromUsername || "Player")}</strong>
+              <span>${escapeHtml(n.message || "Notification")}</span>
+            </div>
+            <div class="notificationActions">${actions}</div>
+          </div>`;
+        })
+        .join("")
+    : `<div class="emptyServers">No notifications.</div>`;
+}
+
+async function openNotifications() {
+  if (!state.account) return openProfileModal();
+  if (!els.notificationsModal) return;
+  els.notificationsModal.hidden = false;
+  try {
+    await loadNotifications();
+  } catch (err) {
+    logLine(`<strong>Notifications</strong>: ${escapeHtml(err.message || "Could not load notifications.")}`);
+  }
+  renderNotifications();
+}
+
+function closeNotifications() {
+  if (els.notificationsModal) els.notificationsModal.hidden = true;
+}
+
+async function acceptNotification(id) {
+  const res = await fetch(`/api/me/notifications/${encodeURIComponent(id)}/accept`, { method: "POST", headers: authHeaders() });
+  const json = await res.json();
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "Could not accept notification.");
+  state.notifications = json.notifications || [];
+  if (json.user) state.account = json.user;
+  saveAccountSession();
+  renderAccountUI();
+  renderNotifications();
+  if (els.profileModal && !els.profileModal.hidden) renderProfile();
+}
+
+async function dismissNotification(id) {
+  const res = await fetch(`/api/me/notifications/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
+  const json = await res.json();
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "Could not dismiss notification.");
+  state.notifications = json.notifications || [];
+  if (json.user) state.account = json.user;
+  saveAccountSession();
+  renderAccountUI();
+  renderNotifications();
 }
 
 function openAuthModal(mode = "login") {
@@ -1473,7 +1569,9 @@ async function submitAuth() {
     if (!res.ok || !json?.ok) throw new Error(json?.error || "Account request failed.");
     state.authToken = json.token;
     state.account = json.user;
+    state.notifications = json.user?.social?.notifications || [];
     saveAccountSession();
+    identifySocialSocket();
     renderAccountUI();
     closeAuthModal();
     if (els.authPassword) els.authPassword.value = "";
@@ -1638,6 +1736,40 @@ function renderProfileTab(user, tab, winRate, readOnly = false) {
   if (tab === "achievements") return renderAchievementsTab(user);
   if (tab === "settings") return renderSettingsTab(user);
   if (tab === "admin") return renderAdminTab(user);
+  const myFriends = state.account?.social?.friends || [];
+  const isMe = state.account && user.username && state.account.username === user.username;
+  const isFriend = myFriends.some((name) => String(name).toLowerCase() === String(user.username || "").toLowerCase());
+  const readOnlyActions =
+    readOnly && state.account && !isMe
+      ? `<div class="friendRow">
+          <button class="sendFriendRequestBtn" data-username="${escapeAttr(user.username)}" type="button" ${isFriend ? "disabled" : ""}>${isFriend ? "Friends" : "Add friend"}</button>
+          <button class="challengeUserBtn primaryBtn" data-username="${escapeAttr(user.username)}" type="button" ${isFriend ? "" : "disabled"}>Challenge</button>
+        </div>`
+      : "";
+  const friends = user.social?.friends || [];
+  const friendProfiles = new Map((user.social?.friendProfiles || []).map((friend) => [String(friend.username || "").toLowerCase(), friend]));
+  const friendRows = friends.length
+    ? friends
+        .map((name) => {
+          const initials = String(name || "?").trim().slice(0, 2).toUpperCase() || "?";
+          const friendProfile = friendProfiles.get(String(name || "").toLowerCase())?.profile || null;
+          const avatar = friendProfile
+            ? avatarMarkup(friendProfile, name, `${name} avatar`)
+            : escapeHtml(initials);
+          const canManage = !readOnly && state.account?.username === user.username;
+          return `<div class="friendItem">
+            <button class="friendProfileBtn" data-username="${escapeAttr(name)}" type="button" title="View ${escapeAttr(name)} profile">
+              <span class="miniAvatar">${avatar}</span>
+              <span class="friendName">${escapeHtml(name)}</span>
+            </button>
+            <div class="friendActions">
+              <button class="challengeUserBtn primaryBtn" data-username="${escapeAttr(name)}" type="button">Challenge</button>
+              ${canManage ? `<button class="unfriendUserBtn" data-username="${escapeAttr(name)}" type="button">Unfriend</button>` : ""}
+            </div>
+          </div>`;
+        })
+        .join("")
+    : `<div class="emptyServers">No friends yet.</div>`;
   return `
     <div class="profileGrid">
       <section class="profileSection">
@@ -1660,16 +1792,17 @@ function renderProfileTab(user, tab, winRate, readOnly = false) {
           <div><span>Rules discovered</span><strong>${n((user.ruleCollection || []).length)}</strong></div>
         </div>
       </section>
-      <section class="profileSection">
-        <h3>Social</h3>
-        <div class="profileList">
-          <div><span>Friends</span><strong>${escapeHtml((user.social?.friends || []).join(", ") || "No friends added")}</strong></div>
-          <div><span>Favourite rivals</span><strong>${escapeHtml((user.social?.rivals || []).map((r) => r.name).join(", ") || "None yet")}</strong></div>
-          <div><span>Clubs</span><strong>${escapeHtml((user.social?.clubs || []).join(", ") || "No club")}</strong></div>
+      <section class="profileSection socialSection">
+        <div class="socialHeader">
+          <div>
+            <h3>Social</h3>
+            <span>${friends.length} friend${friends.length === 1 ? "" : "s"}</span>
+          </div>
         </div>
         <div class="friendList">
-          ${(user.social?.friends || []).map((name) => `<div><span>${escapeHtml(name)}</span><button type="button" disabled>Challenge</button></div>`).join("") || `<div><span>No friends to challenge yet.</span></div>`}
+          ${friendRows}
         </div>
+        ${readOnlyActions}
         ${readOnly ? "" : `<div class="friendRow">
           <input id="friendUsername" placeholder="Friend username" maxlength="16" autocomplete="off" />
           <button id="addFriendBtn" type="button">Add friend</button>
@@ -2354,6 +2487,7 @@ async function logout() {
   }
   state.authToken = null;
   state.account = null;
+  state.notifications = [];
   saveAccountSession();
   renderAccountUI();
   closeProfileModal();
@@ -2424,6 +2558,11 @@ async function addFriend() {
   const input = document.getElementById("friendUsername");
   const username = input?.value.trim() || "";
   if (!username) return;
+  await sendFriendRequest(username);
+  if (input) input.value = "";
+}
+
+async function sendFriendRequest(username) {
   try {
     const res = await fetch("/api/me/friends", {
       method: "POST",
@@ -2433,10 +2572,73 @@ async function addFriend() {
     const json = await res.json();
     if (!res.ok || !json?.ok) throw new Error(json?.error || "Add friend failed.");
     state.account = json.user;
+    state.notifications = json.user?.social?.notifications || state.notifications;
     saveAccountSession();
     renderProfile();
+    logLine(`<strong>Profile</strong>: Friend request sent to ${escapeHtml(username)}.`);
   } catch (err) {
     logLine(`<strong>Profile</strong>: ${escapeHtml(err.message || "Add friend failed.")}`);
+  }
+}
+
+async function openUserProfileByName(username) {
+  const name = String(username || "").trim();
+  if (!name || !els.profileModal) return;
+  state.viewedProfileReadOnly = true;
+  state.viewedProfile = {
+    username: name,
+    createdAt: null,
+    profile: { avatarSeed: `friend:${name}`, bio: "Profile details are loading.", onlineStatus: "Online", banner: "Sunset Clash" },
+    stats: {},
+    rank: { rating: 1000, tier: "Unranked", progress: 0 },
+    matchHistory: [],
+    ruleCollection: [],
+    achievements: [],
+    social: { friends: [], rivals: [], clubs: [] },
+    insights: {},
+  };
+  if (["settings", "admin", "cosmetics"].includes(state.profileTab)) state.profileTab = "overview";
+  renderProfile();
+  els.profileModal.hidden = false;
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(name)}/profile`, { cache: "no-store" });
+    const json = await res.json();
+    if (!res.ok || !json?.ok || !json.user) throw new Error(json?.error || "Profile unavailable.");
+    state.viewedProfile = json.user;
+    renderProfile();
+  } catch (err) {
+    logLine(`<strong>Profile</strong>: ${escapeHtml(err.message || "Profile unavailable.")}`);
+  }
+}
+
+function challengeUser(username) {
+  if (!state.authToken) return openAuthModal("login");
+  socket.emit("social:challenge", { authToken: state.authToken, username }, (res) => {
+    if (!res?.ok) {
+      logLine(`<strong>Challenge</strong>: ${escapeHtml(res?.error || "Challenge failed.")}`);
+      return;
+    }
+    logLine(`<strong>Challenge</strong>: Challenge sent to ${escapeHtml(username)}.`);
+  });
+}
+
+async function unfriendUser(username) {
+  const name = String(username || "").trim();
+  if (!name) return;
+  try {
+    const res = await fetch(`/api/me/friends/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.ok) throw new Error(json?.error || "Unfriend failed.");
+    state.account = json.user;
+    state.notifications = json.user?.social?.notifications || state.notifications;
+    saveAccountSession();
+    renderAccountUI();
+    if (els.profileModal && !els.profileModal.hidden) renderProfile();
+  } catch (err) {
+    logLine(`<strong>Profile</strong>: ${escapeHtml(err.message || "Unfriend failed.")}`);
   }
 }
 
@@ -4992,6 +5194,7 @@ function handleCampaignGameResult(s) {
 socket.on("connect", () => {
   state.connected = true;
   setConnectedUI();
+  identifySocialSocket();
 
   // Auto-resume if we were in a lobby and the socket reconnected (socket.id changes).
   if (state.lobby && state.playerId) {
@@ -5034,6 +5237,35 @@ socket.on("game:emote", (m) => {
   logLine(`<strong>${escapeHtml(m.name || "Player")}</strong>: ${escapeHtml(text)}`);
   syncUI();
   setTimeout(() => syncUI(), 3700);
+});
+
+socket.on("social:state", (payload) => {
+  state.notifications = payload?.notifications || [];
+  if (state.account) {
+    state.account.social = state.account.social || {};
+    state.account.social.notifications = state.notifications;
+    saveAccountSession();
+  }
+  renderAccountUI();
+  if (els.notificationsModal && !els.notificationsModal.hidden) renderNotifications();
+});
+
+socket.on("social:challenge", (invite) => {
+  const accepted = confirm(`${invite?.fromUsername || "A friend"} challenged you to a game. Accept?`);
+  socket.emit("social:challengeResponse", { authToken: state.authToken, challengeId: invite?.id, accepted }, (res) => {
+    if (!res?.ok) logLine(`<strong>Challenge</strong>: ${escapeHtml(res?.error || "Challenge response failed.")}`);
+  });
+});
+
+socket.on("social:challengeDeclined", (payload) => {
+  logLine(`<strong>Challenge</strong>: ${escapeHtml(payload?.fromUsername || "Your friend")} declined the challenge.`);
+});
+
+socket.on("lobby:challengeStarted", (payload) => {
+  if (!payload?.ok) return;
+  closeNotifications();
+  closeProfileModal();
+  enterLobby({ code: payload.code, playerId: payload.playerId, color: payload.color });
 });
 
 socket.on("game:state", (s) => {
@@ -5080,6 +5312,21 @@ els.rulebookModal?.addEventListener("mousedown", (ev) => {
 });
 
 els.profileBtn?.addEventListener("click", () => openProfileModal());
+els.notificationsBtn?.addEventListener("click", () => openNotifications());
+els.notificationsCloseBtn?.addEventListener("click", () => closeNotifications());
+els.notificationsModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.notificationsModal) closeNotifications();
+});
+els.notificationsList?.addEventListener("click", async (ev) => {
+  const acceptBtn = ev.target.closest(".acceptNotificationBtn");
+  const dismissBtn = ev.target.closest(".dismissNotificationBtn");
+  try {
+    if (acceptBtn) await acceptNotification(acceptBtn.dataset.noteId);
+    if (dismissBtn) await dismissNotification(dismissBtn.dataset.noteId);
+  } catch (err) {
+    logLine(`<strong>Notifications</strong>: ${escapeHtml(err.message || "Notification action failed.")}`);
+  }
+});
 els.accountActionBtn?.addEventListener("click", () => openProfileModal());
 els.profileCloseBtn?.addEventListener("click", () => closeProfileModal());
 els.profileModal?.addEventListener("mousedown", (ev) => {
@@ -5098,6 +5345,14 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (target?.id === "changePasswordBtn") changePassword();
   if (target?.id === "campaignResetProfileBtn") resetCampaignProgress();
   if (target?.id === "addFriendBtn") addFriend();
+  const friendBtn = target?.closest?.(".sendFriendRequestBtn");
+  if (friendBtn?.dataset.username) sendFriendRequest(friendBtn.dataset.username);
+  const challengeBtn = target?.closest?.(".challengeUserBtn");
+  if (challengeBtn?.dataset.username) challengeUser(challengeBtn.dataset.username);
+  const unfriendBtn = target?.closest?.(".unfriendUserBtn");
+  if (unfriendBtn?.dataset.username) unfriendUser(unfriendBtn.dataset.username);
+  const friendProfileBtn = target?.closest?.(".friendProfileBtn");
+  if (friendProfileBtn?.dataset.username) openUserProfileByName(friendProfileBtn.dataset.username);
   if (target?.id === "openRuleAppendixBtn") openRulebook();
   if (target?.id === "deleteAccountBtn") deleteAccount();
   if (target?.id === "adminLoadFlagsBtn") adminLoadFlags();
@@ -5442,6 +5697,11 @@ setInterval(() => {
     tickAds();
   }
 }, 250);
+
+setInterval(() => {
+  if (!state.authToken || !state.account) return;
+  loadNotifications().catch(() => {});
+}, 15000);
 
 // Fallback sync: if we haven't seen a state update recently, request one.
 setInterval(() => {
