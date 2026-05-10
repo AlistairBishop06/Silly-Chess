@@ -675,7 +675,7 @@ class Game {
         }
         // Refresh choices (exclude Pot of Greed to avoid infinite loops).
         this.ruleChoicesByPlayerId = {
-          [playerId]: this.ruleManager.allChoices().filter((r) => r.id !== "inst_pot_of_greed"),
+          [playerId]: this.bonusRuleChoicesForPlayer(),
         };
         this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;
         return { ok: true };
@@ -705,6 +705,11 @@ class Game {
     const allChosen = this.players.length === 2 && this.players.every((p) => this.ruleChosenByPlayerId[p.id]);
     if (allChosen) this.applyChosenRulesAndResume();
     return { ok: true };
+  }
+
+  bonusRuleChoicesForPlayer() {
+    const options = { excludeIds: ["inst_pot_of_greed"] };
+    return this.debugMode ? this.ruleManager.allChoices(options) : this.ruleManager.randomChoices(3, options);
   }
 
   applyChosenRulesAndResume() {
@@ -741,7 +746,7 @@ class Game {
     if (!pid) return false;
     this.phase = "bonusRuleChoice";
     this.ruleChoicesByPlayerId = {
-      [pid]: this.ruleManager.allChoices().filter((r) => r.id !== "inst_pot_of_greed"),
+      [pid]: this.bonusRuleChoicesForPlayer(),
     };
     this.ruleChosenByPlayerId = {};
     this.ruleChoiceDeadlineMs = Date.now() + this.ruleChoiceDurationMs;

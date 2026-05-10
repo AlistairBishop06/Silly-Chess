@@ -21,13 +21,15 @@ class RuleManager {
     this.instanceSeq = 1;
   }
 
-  pickableRules() {
+  pickableRules(options = {}) {
     const rules = allRules();
+    const exclude = new Set(Array.isArray(options.excludeIds) ? options.excludeIds : []);
     const pool = Array.isArray(this.game?.rulePoolIds) ? this.game.rulePoolIds : null;
-    if (!pool || !pool.length) return rules;
+    const applyExclude = (items) => (exclude.size ? items.filter((r) => !exclude.has(r.id)) : items);
+    if (!pool || !pool.length) return applyExclude(rules);
     const allow = new Set(pool);
     const filtered = rules.filter((r) => allow.has(r.id));
-    return filtered.length ? filtered : rules;
+    return applyExclude(filtered.length ? filtered : rules);
   }
 
   getActiveClientCards() {
@@ -66,8 +68,8 @@ class RuleManager {
     return mods;
   }
 
-  randomChoices(n) {
-    const pickable = this.pickableRules(); // allow repeats over time
+  randomChoices(n, options = {}) {
+    const pickable = this.pickableRules(options); // allow repeats over time
     const out = [];
     const used = new Set();
     while (out.length < n && used.size < pickable.length) {
@@ -86,8 +88,8 @@ class RuleManager {
     return out;
   }
 
-  allChoices() {
-    const rules = this.pickableRules();
+  allChoices(options = {}) {
+    const rules = this.pickableRules(options);
     return rules.map((r) => ({
       id: r.id,
       name: r.name,
