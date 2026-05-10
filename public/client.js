@@ -1739,13 +1739,6 @@ function renderProfileTab(user, tab, winRate, readOnly = false) {
   const myFriends = state.account?.social?.friends || [];
   const isMe = state.account && user.username && state.account.username === user.username;
   const isFriend = myFriends.some((name) => String(name).toLowerCase() === String(user.username || "").toLowerCase());
-  const readOnlyActions =
-    readOnly && state.account && !isMe
-      ? `<div class="friendRow">
-          <button class="sendFriendRequestBtn" data-username="${escapeAttr(user.username)}" type="button" ${isFriend ? "disabled" : ""}>${isFriend ? "Friends" : "Add friend"}</button>
-          <button class="challengeUserBtn primaryBtn" data-username="${escapeAttr(user.username)}" type="button" ${isFriend ? "" : "disabled"}>Challenge</button>
-        </div>`
-      : "";
   const friends = user.social?.friends || [];
   const friendProfiles = new Map((user.social?.friendProfiles || []).map((friend) => [String(friend.username || "").toLowerCase(), friend]));
   const friendRows = friends.length
@@ -1762,10 +1755,14 @@ function renderProfileTab(user, tab, winRate, readOnly = false) {
               <span class="miniAvatar">${avatar}</span>
               <span class="friendName">${escapeHtml(name)}</span>
             </button>
-            <div class="friendActions">
-              <button class="challengeUserBtn primaryBtn" data-username="${escapeAttr(name)}" type="button">Challenge</button>
-              ${canManage ? `<button class="unfriendUserBtn" data-username="${escapeAttr(name)}" type="button">Unfriend</button>` : ""}
-            </div>
+            ${
+              readOnly
+                ? ""
+                : `<div class="friendActions">
+                    <button class="challengeUserBtn primaryBtn" data-username="${escapeAttr(name)}" type="button">Challenge</button>
+                    ${canManage ? `<button class="unfriendUserBtn" data-username="${escapeAttr(name)}" type="button">Unfriend</button>` : ""}
+                  </div>`
+            }
           </div>`;
         })
         .join("")
@@ -1802,7 +1799,6 @@ function renderProfileTab(user, tab, winRate, readOnly = false) {
         <div class="friendList">
           ${friendRows}
         </div>
-        ${readOnlyActions}
         ${readOnly ? "" : `<div class="friendRow">
           <input id="friendUsername" placeholder="Friend username" maxlength="16" autocomplete="off" />
           <button id="addFriendBtn" type="button">Add friend</button>
