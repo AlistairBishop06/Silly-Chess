@@ -1,7 +1,8 @@
 (function () {
   function createBoardGeometry({ els, state }) {
     function boardSize() {
-      const size = Number(state.serverState?.boardSize || 8);
+      const review = state.reviewIndex != null ? state.reviewTimeline?.[state.reviewIndex]?.snapshot : null;
+      const size = Number((review || state.serverState)?.boardSize || 8);
       return Number.isInteger(size) && size >= 8 ? size : 8;
     }
 

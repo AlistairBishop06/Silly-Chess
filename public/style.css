@@ -1618,6 +1618,44 @@ body.is-in-game:not(.is-choosing) #gamePanel {
   box-shadow: 0 34px 80px rgba(0, 0, 0, 0.35), 0 0 0 9px rgba(255, 255, 255, 0.05);
 }
 
+.moveReviewControls {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(5, 12, 25, 0.78);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+}
+
+.moveReviewControls button {
+  min-width: 34px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.reviewStatus {
+  min-width: 78px;
+  color: rgba(249, 251, 255, 0.86);
+  font-size: 12px;
+  font-weight: 820;
+  text-align: center;
+  white-space: nowrap;
+}
+
+body.is-reviewing-board .boardWrap {
+  border-color: rgba(255, 209, 102, 0.54);
+  box-shadow: 0 34px 80px rgba(0, 0, 0, 0.35), 0 0 0 9px rgba(255, 209, 102, 0.08);
+}
+
 .boardWrap::before {
   content: "";
   position: absolute;

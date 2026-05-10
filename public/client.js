@@ -13,6 +13,8 @@ const state = {
   playerId: null,
   color: null,
   serverState: null,
+  reviewTimeline: [],
+  reviewIndex: null,
   selected: null,
   legalTo: null,
   flipVisual: false,
@@ -181,6 +183,7 @@ function resetToLobby(reason) {
   state.playerId = null;
   state.color = null;
   state.serverState = null;
+  clearReviewTimeline();
   state.selected = null;
   state.legalTo = null;
   state.lastChoiceKey = null;
@@ -203,6 +206,7 @@ function enterLobby({ code, playerId, color }) {
   state.playerId = playerId;
   state.color = color;
   state.serverState = null;
+  clearReviewTimeline();
   state.selected = null;
   state.legalTo = null;
   state.lastChoiceKey = null;
@@ -218,6 +222,93 @@ function enterLobby({ code, playerId, color }) {
   saveSession();
   syncUI();
   socket.emit("game:sync", { code, playerId });
+}
+
+function cloneForReview(value) {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+
+function reviewFingerprint(s) {
+  return JSON.stringify({
+    roomCode: s?.roomCode || "",
+    rematchId: s?.rematchId || 0,
+    ply: s?.ply || 0,
+    board: s?.board || [],
+    boardSize: s?.boardSize || 8,
+    missingSquares: s?.missingSquares || [],
+    hazards: s?.hazards || {},
+    marks: s?.marks || {},
+    ghostSquares: s?.ghostSquares || [],
+    stickySquares: s?.stickySquares || [],
+    fans: s?.fans || [],
+    supermarkets: s?.supermarkets || [],
+    fruitMachines: s?.fruitMachines || [],
+    lastMoveSquares: s?.lastMoveSquares || [],
+  });
+}
+
+function clearReviewTimeline() {
+  state.reviewTimeline = [];
+  state.reviewIndex = null;
+  state.selected = null;
+  state.legalTo = null;
+}
+
+function recordReviewSnapshot(s) {
+  if (!s?.started || !Array.isArray(s.board)) return;
+  const fingerprint = reviewFingerprint(s);
+  const last = state.reviewTimeline[state.reviewTimeline.length - 1];
+  if (last?.fingerprint === fingerprint) return;
+  state.reviewTimeline.push({ fingerprint, snapshot: cloneForReview(s) });
+  if (state.reviewTimeline.length > 80) {
+    state.reviewTimeline.shift();
+    if (state.reviewIndex != null) state.reviewIndex = Math.max(0, state.reviewIndex - 1);
+  }
+}
+
+function displayState() {
+  if (state.reviewIndex == null) return state.serverState;
+  return state.reviewTimeline[state.reviewIndex]?.snapshot || state.serverState;
+}
+
+function isReviewing() {
+  return state.reviewIndex != null;
+}
+
+function setReviewIndex(index) {
+  if (!state.reviewTimeline.length) {
+    state.reviewIndex = null;
+    return;
+  }
+  const latest = state.reviewTimeline.length - 1;
+  if (index == null || index >= latest) {
+    state.reviewIndex = null;
+  } else {
+    state.reviewIndex = Math.max(0, Math.min(index, latest));
+  }
+  state.selected = null;
+  state.legalTo = null;
+  syncUI();
+}
+
+function updateReviewControls() {
+  if (!els.moveReviewControls) return;
+  const total = state.reviewTimeline.length;
+  const latest = total - 1;
+  const reviewing = isReviewing();
+  const current = reviewing ? state.reviewIndex : latest;
+  const canBack = total > 1 && current > 0;
+  const canForward = total > 1 && reviewing;
+  els.moveReviewControls.hidden = !state.lobby;
+  if (els.reviewBackBtn) els.reviewBackBtn.disabled = !canBack;
+  if (els.reviewForwardBtn) els.reviewForwardBtn.disabled = !canForward;
+  if (els.reviewLiveBtn) els.reviewLiveBtn.disabled = !reviewing;
+  if (els.reviewStatus) {
+    els.reviewStatus.textContent =
+      !total ? "Live" : reviewing ? `Review ${current + 1}/${total}` : total > 1 ? `Live ${total}/${total}` : "Live";
+  }
+  document.body.classList.toggle("is-reviewing-board", reviewing);
 }
 
 function loadSession() {
@@ -3261,7 +3352,8 @@ function draw() {
   requestAnimationFrame(draw);
   if (!state.serverState) return;
 
-  const s = state.serverState;
+  const s = displayState();
+  if (!s) return;
   const boardN = boardSize();
   const size = els.canvas.width / boardN;
   const t = nowMs();
@@ -3401,7 +3493,9 @@ function draw() {
   // Overlay text.
   const yourTurn = s.turn === state.color && s.phase === "play";
   const msg =
-    s.phase === "ruleChoice"
+    isReviewing()
+      ? "Reviewing board"
+      : s.phase === "ruleChoice"
       ? "Rule choice!"
       : s.phase === "bonusRuleChoice"
         ? "Bonus rule picks!"
@@ -3867,15 +3961,16 @@ function drawPiece(sq, p) {
 
 function drawPieceAt(x, y, p, sq = null) {
   const size = els.canvas.width / boardSize();
-  const colourBlind = !!(state.serverState && state.serverState.colourBlind);
+  const s = displayState();
+  const colourBlind = !!(s && s.colourBlind);
   const shieldCharges =
-    p?.type === "k" && p?.color && state.serverState?.shield && typeof state.serverState.shield[p.color] === "number"
-      ? state.serverState.shield[p.color]
+    p?.type === "k" && p?.color && s?.shield && typeof s.shield[p.color] === "number"
+      ? s.shield[p.color]
       : 0;
   const pieceStyle = pieceSkinStyle(p, colourBlind);
 
   // Subtle glow for last move.
-  if (sq != null && (state.serverState.lastMoveSquares || []).includes(sq)) {
+  if (sq != null && (s?.lastMoveSquares || []).includes(sq)) {
     ctx.fillStyle = "rgba(125,255,179,0.18)";
     ctx.beginPath();
     ctx.arc(x, y, size * 0.42, 0, Math.PI * 2);
@@ -3979,7 +4074,7 @@ function drawPieceAt(x, y, p, sq = null) {
     ctx.fillRect(size * 0.22, -size * 0.025, size * 0.12, size * 0.05);
     ctx.restore();
   }
-  if (sq != null && state.serverState?.backupVitalSquare === sq) {
+  if (sq != null && s?.backupVitalSquare === sq) {
     ctx.font = `${Math.floor(size * 0.2)}px "Segoe UI Symbol", "Noto Color Emoji", sans-serif`;
     ctx.fillStyle = "#ff4f8b";
     ctx.strokeStyle = "rgba(0,0,0,0.42)";
@@ -4005,6 +4100,8 @@ function drawPieceAt(x, y, p, sq = null) {
 
 function drawTitanPiece(sq, p) {
   const size = els.canvas.width / boardSize();
+  const s = displayState();
+  const colourBlind = !!s?.colourBlind;
   const box = titanBounds(sq);
   const centerX = (box.left + box.right) / 2;
   const centerY = (box.top + box.bottom) / 2;
@@ -4018,7 +4115,7 @@ function drawTitanPiece(sq, p) {
   ctx.fill();
   ctx.stroke();
 
-  const pieceStyle = pieceSkinStyle(p, !!state.serverState?.colourBlind);
+  const pieceStyle = pieceSkinStyle(p, colourBlind);
   drawPieceSkinBase(centerX, centerY, size * 1.55, p, pieceStyle);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -4029,7 +4126,7 @@ function drawTitanPiece(sq, p) {
     ctx.shadowBlur = size * 0.16;
   }
   ctx.lineWidth = 7;
-  const mutantGlyphs = p.tags?.includes("mutant") ? pieceGlyphsFor(p, !!state.serverState?.colourBlind).slice(0, 5) : null;
+  const mutantGlyphs = p.tags?.includes("mutant") ? pieceGlyphsFor(p, colourBlind).slice(0, 5) : null;
   if (mutantGlyphs?.length > 1) {
     ctx.save();
     ctx.translate(centerX, centerY);
@@ -4050,7 +4147,7 @@ function drawTitanPiece(sq, p) {
     ctx.restore();
   } else {
     ctx.font = `${Math.floor(size * 1.05)}px "Segoe UI Symbol", "Noto Sans Symbols2", serif`;
-    const glyph = pieceGlyph(p.type, p.color, !!state.serverState?.colourBlind);
+    const glyph = pieceGlyph(p.type, p.color, colourBlind);
     ctx.strokeText(glyph, centerX, centerY + 4);
     ctx.fillText(glyph, centerX, centerY);
   }
@@ -4692,6 +4789,7 @@ function syncUI() {
   els.lobbyPanel.hidden = connected || showCampaign;
   if (els.campaignPanel) els.campaignPanel.hidden = !showCampaign;
   els.gamePanel.hidden = !connected;
+  updateReviewControls();
   if (!connected) return;
 
   if (!s) {
@@ -4713,6 +4811,7 @@ function syncUI() {
     if (els.sideLabelTop) els.sideLabelTop.textContent = "";
     if (els.sideLabelBottom) els.sideLabelBottom.textContent = "";
     els.canvas.style.cursor = "";
+    updateReviewControls();
     return;
   }
 
@@ -4769,6 +4868,7 @@ function syncUI() {
   renderSupermarket();
   renderFruitMachine();
   renderMutant();
+  updateReviewControls();
 
   // Result modal.
   const ri = s.resultInfo;
@@ -4944,11 +5044,13 @@ socket.on("game:state", (s) => {
     state.lastEffectsSeen = new Set();
     state.lastChoiceKey = null;
     state.supplyDrops = [];
+    clearReviewTimeline();
     clearAds();
     stopConfetti();
   }
   state.lastRematchId = s.rematchId ?? state.lastRematchId;
   state.serverState = s;
+  recordReviewSnapshot(s);
   state.lastStateAt = Date.now();
   if (s?.resultInfo && state.authToken) {
     const resultKey = `${s.rematchId || 0}:${s.resultInfo.winner || ""}:${s.resultInfo.loser || ""}:${s.resultInfo.reason || ""}`;
@@ -5221,8 +5323,25 @@ els.mutantConfirmBtn?.addEventListener("click", () => {
   });
 });
 
+els.reviewBackBtn?.addEventListener("click", () => {
+  const total = state.reviewTimeline.length;
+  if (total < 2) return;
+  const current = state.reviewIndex == null ? total - 1 : state.reviewIndex;
+  setReviewIndex(current - 1);
+});
+
+els.reviewForwardBtn?.addEventListener("click", () => {
+  if (state.reviewIndex == null) return;
+  setReviewIndex(state.reviewIndex + 1);
+});
+
+els.reviewLiveBtn?.addEventListener("click", () => {
+  setReviewIndex(null);
+});
+
 els.canvas.addEventListener("mousedown", (ev) => {
   if (!state.serverState || !state.lobby) return;
+  if (isReviewing()) return;
   const s = state.serverState;
   if (s.phase === "targetRule") {
     const pending = s.pendingTargetRule;

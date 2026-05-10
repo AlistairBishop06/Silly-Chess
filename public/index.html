@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chaos Chess</title>
-    <link rel="stylesheet" href="style.css?v=20260427" />
+    <link rel="stylesheet" href="style.css?v=20260510" />
   </head>
   <body>
     <div id="app">
@@ -129,6 +129,12 @@
               <div class="boardWrap">
                 <canvas id="board" width="720" height="720"></canvas>
                 <div id="overlayText" class="overlayText"></div>
+              </div>
+              <div class="moveReviewControls" id="moveReviewControls" aria-label="Move review controls">
+                <button id="reviewBackBtn" type="button" aria-label="Previous board state" title="Previous board state">&larr;</button>
+                <div id="reviewStatus" class="reviewStatus">Live</div>
+                <button id="reviewForwardBtn" type="button" aria-label="Next board state" title="Next board state">&rarr;</button>
+                <button id="reviewLiveBtn" type="button">Live</button>
               </div>
             </div>
 
@@ -417,12 +423,12 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/constants.js?v=20260508"></script>
-    <script src="js/board-geometry.js?v=20260508"></script>
+    <script src="js/board-geometry.js?v=20260510"></script>
     <script src="js/card-fx.js?v=20260508"></script>
-    <script src="js/dom.js?v=20260508"></script>
+    <script src="js/dom.js?v=20260510"></script>
     <script src="js/draggable-modals.js?v=20260508"></script>
     <script src="js/realtime.js?v=20260508"></script>
     <script src="js/storage.js?v=20260508"></script>
-    <script src="client.js?v=20260429"></script>
+    <script src="client.js?v=20260510"></script>
   </body>
 </html>
