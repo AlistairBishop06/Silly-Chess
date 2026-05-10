@@ -14,6 +14,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     hydrateUser,
     recordGameStarted,
     saveUsers,
+    shareClub,
     uniqueStrings,
     userById,
   } = accountService;
@@ -418,7 +419,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
       if (!target) return cb?.({ ok: false, error: "Player not found." });
       hydrateUser(target);
       if (target.id === challenger.id) return cb?.({ ok: false, error: "You cannot challenge yourself." });
-      if (!areFriends(challenger, target)) return cb?.({ ok: false, error: "You can only challenge friends." });
+      if (!areFriends(challenger, target) && !shareClub(challenger, target)) return cb?.({ ok: false, error: "You can only challenge friends or clubmates." });
       if (!userAvailableForChallenge(challenger.id)) return cb?.({ ok: false, error: "You are already in a game or lobby." });
       if (!userAvailableForChallenge(target.id)) return cb?.({ ok: false, error: "That player is not available right now." });
 

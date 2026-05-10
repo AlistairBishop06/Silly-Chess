@@ -3776,6 +3776,86 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   padding: 6px 9px;
 }
 
+.clubsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.clubsHeader h3 {
+  margin: 0;
+}
+
+.clubsHeader span,
+.clubMeta {
+  color: rgba(249, 251, 255, 0.66);
+  font-size: 12px;
+}
+
+.createClubBox {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.3fr) auto;
+  gap: 9px;
+  align-items: end;
+}
+
+.clubGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.clubCard,
+.clubPanel {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 11px;
+}
+
+.clubCard strong,
+.clubCard span {
+  display: block;
+}
+
+.clubCard span,
+.clubFeed span {
+  color: rgba(249, 251, 255, 0.72);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.clubDashboard {
+  gap: 12px;
+}
+
+.clubRequestList,
+.clubFeed {
+  display: grid;
+  gap: 8px;
+}
+
+.clubRequestList > div,
+.clubFeed > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  background: rgba(5, 12, 25, 0.32);
+  padding: 8px;
+}
+
+.clubRequestList button {
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
 .settingsGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

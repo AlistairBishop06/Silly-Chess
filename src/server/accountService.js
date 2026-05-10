@@ -28,16 +28,17 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     try {
       const raw = fs.readFileSync(USERS_FILE, "utf8");
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || !parsed.users || typeof parsed.users !== "object") return { users: {}, sessions: {} };
+      if (!parsed || typeof parsed !== "object" || !parsed.users || typeof parsed.users !== "object") return { users: {}, sessions: {}, clubs: {} };
       if (!parsed.sessions || typeof parsed.sessions !== "object") parsed.sessions = {};
+      if (!parsed.clubs || typeof parsed.clubs !== "object") parsed.clubs = {};
       return parsed;
     } catch (err) {
       if (err.code !== "ENOENT") console.error("Failed to load users.json", err);
-      return { users: {}, sessions: {} };
+      return { users: {}, sessions: {}, clubs: {} };
     }
   }
   
-  let userStore = { users: {}, sessions: {} };
+  let userStore = { users: {}, sessions: {}, clubs: {} };
   let userStoreWriteQueue = Promise.resolve();
   
   function saveUsers(store, options = {}) {
@@ -80,6 +81,14 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
           [token, session.userId, JSON.stringify(session)]
         );
       }
+      await client.query("DELETE FROM app_clubs");
+      for (const club of Object.values(store.clubs || {})) {
+        await client.query(
+          `INSERT INTO app_clubs (club_id, slug, payload, created_at, updated_at)
+           VALUES ($1, $2, $3::jsonb, COALESCE(($3::jsonb->>'createdAt')::timestamptz, NOW()), NOW())`,
+          [club.id, club.slug, JSON.stringify(club)]
+        );
+      }
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -112,8 +121,13 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     const sessions = sessionsByTokens(store, options.sessionTokens);
     const deleteUserIds = (Array.isArray(options.deleteUserIds) ? options.deleteUserIds : []).filter(Boolean);
     const deleteSessionTokens = (Array.isArray(options.deleteSessionTokens) ? options.deleteSessionTokens : []).filter(Boolean);
+    const clubs = (Array.isArray(options.clubIds) ? options.clubIds : [])
+      .filter(Boolean)
+      .map((id) => store.clubs?.[id])
+      .filter(Boolean);
+    const deleteClubIds = (Array.isArray(options.deleteClubIds) ? options.deleteClubIds : []).filter(Boolean);
 
-    if (!users.length && !sessions.length && !deleteUserIds.length && !deleteSessionTokens.length) return;
+    if (!users.length && !sessions.length && !clubs.length && !deleteUserIds.length && !deleteSessionTokens.length && !deleteClubIds.length) return;
 
     const client = await db.connect();
     try {
@@ -124,6 +138,9 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       if (deleteUserIds.length) {
         await client.query("DELETE FROM app_sessions WHERE user_id = ANY($1::uuid[])", [deleteUserIds]);
         await client.query("DELETE FROM app_users WHERE user_id = ANY($1::uuid[])", [deleteUserIds]);
+      }
+      if (deleteClubIds.length) {
+        await client.query("DELETE FROM app_clubs WHERE club_id = ANY($1::text[])", [deleteClubIds]);
       }
       for (const user of users) {
         await client.query(
@@ -145,6 +162,17 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
                payload = EXCLUDED.payload,
                created_at = EXCLUDED.created_at`,
           [token, session.userId, JSON.stringify(session)]
+        );
+      }
+      for (const club of clubs) {
+        await client.query(
+          `INSERT INTO app_clubs (club_id, slug, payload, created_at, updated_at)
+           VALUES ($1, $2, $3::jsonb, COALESCE(($3::jsonb->>'createdAt')::timestamptz, NOW()), NOW())
+           ON CONFLICT (club_id) DO UPDATE
+           SET slug = EXCLUDED.slug,
+               payload = EXCLUDED.payload,
+               updated_at = NOW()`,
+          [club.id, club.slug, JSON.stringify(club)]
         );
       }
       await client.query("COMMIT");
@@ -220,9 +248,19 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         created_at bigint NOT NULL
       )
     `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS app_clubs (
+        club_id text PRIMARY KEY,
+        slug text UNIQUE NOT NULL,
+        payload jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT NOW(),
+        updated_at timestamptz NOT NULL DEFAULT NOW()
+      )
+    `);
   
     const usersRes = await db.query("SELECT payload FROM app_users");
     const sessionsRes = await db.query("SELECT session_token, payload FROM app_sessions");
+    const clubsRes = await db.query("SELECT payload FROM app_clubs");
     const users = {};
     for (const row of usersRes.rows) {
       const user = row.payload;
@@ -232,6 +270,11 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     for (const row of sessionsRes.rows) {
       sessions[row.session_token] = row.payload;
     }
+    const clubs = {};
+    for (const row of clubsRes.rows) {
+      const club = row.payload;
+      if (club?.id) clubs[club.id] = club;
+    }
   
     if (!Object.keys(users).length && fs.existsSync(USERS_FILE)) {
       userStore = loadUsers();
@@ -239,7 +282,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       return;
     }
   
-    userStore = { users, sessions };
+    userStore = { users, sessions, clubs };
   }
   
   function normalizeUsername(username) {
@@ -249,8 +292,22 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   function usernameKey(username) {
     return normalizeUsername(username).toLowerCase();
   }
+
+  function normalizeClubName(name) {
+    return String(name || "").trim().replace(/\s+/g, " ").slice(0, 32);
+  }
+
+  function clubSlug(name) {
+    return String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40);
+  }
   
   const ADMIN_MIN_COIN_BALANCE = 1_000_000_000;
+  const CLUB_CREATE_COST = 2000;
   const DEFAULT_AVATAR_STYLE = "thumbs";
   const AVATAR_STYLE_ALIASES = {
     adventurer: "adventurer",
@@ -404,6 +461,97 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     return user;
   }
 
+  function hydrateClub(club) {
+    if (!club) return null;
+    club.id = String(club.id || crypto.randomUUID());
+    club.name = normalizeClubName(club.name || "Club");
+    club.slug = clubSlug(club.slug || club.name) || club.id;
+    club.description = String(club.description || "").trim().slice(0, 180);
+    club.ownerUserId = club.ownerUserId || null;
+    club.ownerUsername = club.ownerUsername || "Unknown";
+    club.createdAt = club.createdAt || new Date().toISOString();
+    club.members = Array.isArray(club.members) ? club.members : [];
+    club.joinRequests = Array.isArray(club.joinRequests) ? club.joinRequests : [];
+    club.activity = Array.isArray(club.activity) ? club.activity : [];
+    club.announcements = Array.isArray(club.announcements) ? club.announcements : [];
+    club.settings = club.settings && typeof club.settings === "object" ? club.settings : {};
+    club.settings.visibility = club.settings.visibility === "private" ? "private" : "public";
+    club.settings.requestOnly = club.settings.requestOnly !== false;
+    return club;
+  }
+
+  function clubById(clubId) {
+    return hydrateClub(userStore.clubs?.[String(clubId || "")]);
+  }
+
+  function clubsForUser(userId) {
+    return Object.values(userStore.clubs || {}).map(hydrateClub).filter((club) => club?.members.some((m) => m.userId === userId));
+  }
+
+  function clubRole(club, userId) {
+    if (!club || !userId) return null;
+    if (club.ownerUserId === userId) return "owner";
+    return club.members.find((m) => m.userId === userId)?.role || null;
+  }
+
+  function canManageClub(club, userId) {
+    const role = clubRole(club, userId);
+    return role === "owner" || role === "admin";
+  }
+
+  function addClubActivity(club, text) {
+    club.activity = [{ id: notificationId(), text, createdAt: Date.now() }, ...(club.activity || [])].slice(0, 40);
+  }
+
+  function publicClubCard(club, viewer = null) {
+    hydrateClub(club);
+    const role = viewer?.id ? clubRole(club, viewer.id) : null;
+    return {
+      id: club.id,
+      name: club.name,
+      slug: club.slug,
+      description: club.description,
+      ownerUsername: club.ownerUsername,
+      createdAt: club.createdAt,
+      memberCount: club.members.length,
+      role,
+      isMember: !!role,
+      hasRequested: !!viewer?.id && club.joinRequests.some((r) => r.userId === viewer.id),
+      settings: { ...club.settings },
+    };
+  }
+
+  function publicClubDetail(club, viewer) {
+    hydrateClub(club);
+    const role = clubRole(club, viewer?.id);
+    const canManage = canManageClub(club, viewer?.id);
+    const usersByIdMap = new Map(Object.values(userStore.users || {}).map((u) => [u.id, hydrateUser(u)]));
+    const members = club.members.map((member) => {
+      const user = usersByIdMap.get(member.userId);
+      return {
+        userId: member.userId,
+        username: user?.username || member.username || "Unknown",
+        role: member.role || "member",
+        joinedAt: member.joinedAt || club.createdAt,
+        profile: user ? publicProfile(user) : null,
+        stats: user ? { rating: user.stats?.rating || 1000, gamesPlayed: user.stats?.gamesPlayed || 0 } : { rating: 1000, gamesPlayed: 0 },
+      };
+    });
+    return {
+      ...publicClubCard(club, viewer),
+      canManage,
+      members,
+      joinRequests: canManage ? club.joinRequests : [],
+      activity: club.activity || [],
+      announcements: club.announcements || [],
+      stats: {
+        totalMembers: members.length,
+        totalGamesPlayed: members.reduce((sum, m) => sum + Number(m.stats?.gamesPlayed || 0), 0),
+        topRated: members.slice().sort((a, b) => (b.stats?.rating || 0) - (a.stats?.rating || 0)).slice(0, 5),
+      },
+    };
+  }
+
   function notificationId() {
     return `N${Date.now().toString(36)}${crypto.randomBytes(4).toString("hex")}`;
   }
@@ -448,6 +596,14 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     hydrateUser(a);
     hydrateUser(b);
     return (a.social.friends || []).some((name) => usernameKey(name) === b.usernameKey);
+  }
+
+  function shareClub(a, b) {
+    if (!a?.id || !b?.id) return false;
+    return Object.values(userStore.clubs || {}).some((club) => {
+      hydrateClub(club);
+      return club.members.some((m) => m.userId === a.id) && club.members.some((m) => m.userId === b.id);
+    });
   }
 
   function addMutualFriend(a, b) {
@@ -772,7 +928,13 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       friends,
       friendProfiles,
       rivals: user.social?.rivals || [],
-      clubs: user.social?.clubs || [],
+      clubs: clubsForUser(user.id).map((club) => ({
+        id: club.id,
+        name: club.name,
+        slug: club.slug,
+        role: clubRole(club, user.id),
+        memberCount: club.members.length,
+      })),
       notifications: publicNotifications(user),
     };
   }
@@ -1203,6 +1365,219 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       res.json({ ok: true, user: publicUser(user) });
     });
 
+    app.get("/api/clubs", (req, res) => {
+      const viewer = accountFromToken(authTokenFromReq(req));
+      const clubs = Object.values(userStore.clubs || {}).map((club) => publicClubCard(club, viewer));
+      clubs.sort((a, b) => b.memberCount - a.memberCount || a.name.localeCompare(b.name));
+      res.json({ ok: true, clubs });
+    });
+
+    app.post("/api/clubs", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const name = normalizeClubName(req.body?.name);
+      const description = String(req.body?.description || "").trim().slice(0, 180);
+      const slug = clubSlug(name);
+      if (name.length < 3 || !slug) return res.status(400).json({ ok: false, error: "Club name must be at least 3 characters." });
+      if (Object.values(userStore.clubs || {}).some((club) => hydrateClub(club).slug === slug)) {
+        return res.status(409).json({ ok: false, error: "A club with that name already exists." });
+      }
+      if (!user.isAdmin && Number(user.stats?.coins || 0) < CLUB_CREATE_COST) {
+        return res.status(400).json({ ok: false, error: `Creating a club costs ${CLUB_CREATE_COST} coins.` });
+      }
+      if (!user.isAdmin) {
+        user.stats.coins -= CLUB_CREATE_COST;
+        user.stats.coinsSpent += CLUB_CREATE_COST;
+      }
+      const club = hydrateClub({
+        id: crypto.randomUUID(),
+        name,
+        slug,
+        description,
+        ownerUserId: user.id,
+        ownerUsername: user.username,
+        createdAt: new Date().toISOString(),
+        members: [{ userId: user.id, username: user.username, role: "owner", joinedAt: Date.now() }],
+        joinRequests: [],
+        activity: [],
+        announcements: [],
+        settings: { visibility: req.body?.visibility === "private" ? "private" : "public", requestOnly: true },
+      });
+      addClubActivity(club, `${user.username} founded the club.`);
+      userStore.clubs[club.id] = club;
+      saveUsers(userStore, { userIds: [user.id], clubIds: [club.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubDetail(club, user), user: publicUser(user) });
+    });
+
+    app.get("/api/clubs/:clubId", (req, res) => {
+      const user = accountFromToken(authTokenFromReq(req));
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      const role = clubRole(club, user?.id);
+      if (club.settings.visibility === "private" && !role) return res.status(403).json({ ok: false, error: "This club is private." });
+      res.json({ ok: true, club: role ? publicClubDetail(club, user) : publicClubCard(club, user) });
+    });
+
+    app.patch("/api/clubs/:clubId", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (clubRole(club, user.id) !== "owner") return res.status(403).json({ ok: false, error: "Only the owner can edit club details." });
+      if (typeof req.body?.name === "string") {
+        const name = normalizeClubName(req.body.name);
+        const slug = clubSlug(name);
+        if (name.length < 3 || !slug) return res.status(400).json({ ok: false, error: "Club name must be at least 3 characters." });
+        if (slug !== club.slug && Object.values(userStore.clubs || {}).some((c) => hydrateClub(c).slug === slug)) {
+          return res.status(409).json({ ok: false, error: "A club with that name already exists." });
+        }
+        club.name = name;
+        club.slug = slug;
+      }
+      if (typeof req.body?.description === "string") club.description = req.body.description.trim().slice(0, 180);
+      if (req.body?.visibility === "public" || req.body?.visibility === "private") club.settings.visibility = req.body.visibility;
+      saveUsers(userStore, { clubIds: [club.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubDetail(club, user) });
+    });
+
+    app.delete("/api/clubs/:clubId", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (clubRole(club, user.id) !== "owner") return res.status(403).json({ ok: false, error: "Only the owner can delete the club." });
+      delete userStore.clubs[club.id];
+      saveUsers(userStore, { deleteClubIds: [club.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, user: publicUser(user) });
+    });
+
+    app.post("/api/clubs/:clubId/request", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (clubRole(club, user.id)) return res.json({ ok: true, club: publicClubDetail(club, user), alreadyMember: true });
+      if (!club.joinRequests.some((r) => r.userId === user.id)) {
+        club.joinRequests.push({ userId: user.id, username: user.username, createdAt: Date.now() });
+        for (const member of club.members.filter((m) => m.role === "owner" || m.role === "admin")) {
+          const manager = userById(member.userId);
+          if (manager) {
+            addNotification(manager, {
+              type: "clubJoinRequest",
+              fromUserId: user.id,
+              fromUsername: user.username,
+              clubId: club.id,
+              clubName: club.name,
+              message: `${user.username} requested to join ${club.name}.`,
+            });
+          }
+        }
+      }
+      saveUsers(userStore, { clubIds: [club.id], userIds: club.members.map((m) => m.userId) });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubCard(club, user), requested: true });
+    });
+
+    async function resolveClubRequest(req, res, accepted) {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (!canManageClub(club, user.id)) return res.status(403).json({ ok: false, error: "Only club admins can manage requests." });
+      const target = userById(req.params.userId);
+      const request = club.joinRequests.find((r) => r.userId === req.params.userId);
+      if (!request) return res.status(404).json({ ok: false, error: "Join request not found." });
+      club.joinRequests = club.joinRequests.filter((r) => r.userId !== req.params.userId);
+      if (accepted && target && !clubRole(club, target.id)) {
+        club.members.push({ userId: target.id, username: target.username, role: "member", joinedAt: Date.now() });
+        addClubActivity(club, `${target.username} joined the club.`);
+      }
+      if (target) {
+        addNotification(target, {
+          type: accepted ? "clubJoinAccepted" : "clubJoinDenied",
+          fromUserId: user.id,
+          fromUsername: user.username,
+          clubId: club.id,
+          clubName: club.name,
+          message: accepted ? `Your request to join ${club.name} was accepted.` : `Your request to join ${club.name} was denied.`,
+        });
+      }
+      saveUsers(userStore, { clubIds: [club.id], userIds: [target?.id, ...club.members.map((m) => m.userId)].filter(Boolean) });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubDetail(club, user) });
+    }
+
+    app.post("/api/clubs/:clubId/requests/:userId/accept", (req, res) => resolveClubRequest(req, res, true));
+    app.post("/api/clubs/:clubId/requests/:userId/deny", (req, res) => resolveClubRequest(req, res, false));
+
+    app.post("/api/clubs/:clubId/leave", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (club.ownerUserId === user.id) return res.status(400).json({ ok: false, error: "Owners must delete the club or promote another owner first." });
+      club.members = club.members.filter((m) => m.userId !== user.id);
+      addClubActivity(club, `${user.username} left the club.`);
+      saveUsers(userStore, { clubIds: [club.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, user: publicUser(user) });
+    });
+
+    async function setClubMemberRole(req, res, role) {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (clubRole(club, user.id) !== "owner") return res.status(403).json({ ok: false, error: "Only the owner can change roles." });
+      const member = club.members.find((m) => m.userId === req.params.userId);
+      if (!member || member.role === "owner") return res.status(404).json({ ok: false, error: "Member not found." });
+      member.role = role;
+      saveUsers(userStore, { clubIds: [club.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubDetail(club, user) });
+    }
+
+    app.post("/api/clubs/:clubId/members/:userId/promote", (req, res) => setClubMemberRole(req, res, "admin"));
+    app.post("/api/clubs/:clubId/members/:userId/demote", (req, res) => setClubMemberRole(req, res, "member"));
+
+    app.delete("/api/clubs/:clubId/members/:userId", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (!canManageClub(club, user.id)) return res.status(403).json({ ok: false, error: "Only club admins can remove members." });
+      const member = club.members.find((m) => m.userId === req.params.userId);
+      if (!member || member.role === "owner") return res.status(404).json({ ok: false, error: "Member not found." });
+      club.members = club.members.filter((m) => m.userId !== req.params.userId);
+      addClubActivity(club, `${member.username} was removed from the club.`);
+      saveUsers(userStore, { clubIds: [club.id] });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubDetail(club, user) });
+    });
+
+    app.post("/api/clubs/:clubId/announcements", async (req, res) => {
+      const user = authedUser(req, res);
+      if (!user) return;
+      const club = clubById(req.params.clubId);
+      if (!club) return res.status(404).json({ ok: false, error: "Club not found." });
+      if (!canManageClub(club, user.id)) return res.status(403).json({ ok: false, error: "Only club admins can post announcements." });
+      const text = String(req.body?.text || "").trim().slice(0, 180);
+      if (!text) return res.status(400).json({ ok: false, error: "Announcement cannot be empty." });
+      club.announcements = [{ id: notificationId(), text, author: user.username, createdAt: Date.now() }, ...(club.announcements || [])].slice(0, 20);
+      addClubActivity(club, `${user.username} posted an announcement.`);
+      for (const member of club.members) {
+        if (member.userId === user.id) continue;
+        const target = userById(member.userId);
+        if (target) addNotification(target, { type: "clubAnnouncement", fromUserId: user.id, fromUsername: user.username, clubId: club.id, clubName: club.name, message: `${club.name}: ${text}` });
+      }
+      saveUsers(userStore, { clubIds: [club.id], userIds: club.members.map((m) => m.userId) });
+      await flushUserStoreWrites();
+      res.json({ ok: true, club: publicClubDetail(club, user) });
+    });
+
     app.get("/api/me/notifications", (req, res) => {
       const user = authedUser(req, res);
       if (!user) return;
@@ -1255,7 +1630,21 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         }
       }
       delete userStore.users[user.usernameKey];
-      saveUsers(userStore, { deleteUserIds: [user.id], deleteSessionTokens: deletedSessionTokens });
+      const changedClubIds = [];
+      const deletedClubIds = [];
+      for (const club of Object.values(userStore.clubs || {}).map(hydrateClub)) {
+        if (club.ownerUserId === user.id) {
+          delete userStore.clubs[club.id];
+          deletedClubIds.push(club.id);
+          continue;
+        }
+        const beforeMembers = club.members.length;
+        const beforeRequests = club.joinRequests.length;
+        club.members = club.members.filter((m) => m.userId !== user.id);
+        club.joinRequests = club.joinRequests.filter((r) => r.userId !== user.id);
+        if (club.members.length !== beforeMembers || club.joinRequests.length !== beforeRequests) changedClubIds.push(club.id);
+      }
+      saveUsers(userStore, { deleteUserIds: [user.id], deleteSessionTokens: deletedSessionTokens, clubIds: changedClubIds, deleteClubIds: deletedClubIds });
       await flushUserStoreWrites();
       res.json({ ok: true });
     });
@@ -1326,6 +1715,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     accountFromPayload,
     addNotification,
     areFriends,
+    shareClub,
     applyAccountToPlayer,
     completeCampaignLevelForUser,
     ensureCampaignProgress,

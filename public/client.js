@@ -48,6 +48,9 @@ const state = {
   authMode: "login",
   profileTab: "overview",
   profileRulesTab: "multiplayer",
+  clubs: [],
+  activeClub: null,
+  clubStatus: "",
   viewedProfile: null,
   viewedProfileReadOnly: false,
   lastProfileResultKey: null,
@@ -1444,92 +1447,7 @@ function renderAccountUI() {
   if (els.accountSummary) els.accountSummary.textContent = signedIn ? `Playing as ${user.username}` : "Sign up or log in to play.";
   if (els.accountActionBtn) els.accountActionBtn.textContent = signedIn ? "Profile" : "Sign in";
   if (els.profileBtn) els.profileBtn.textContent = signedIn ? user.username : "Sign in";
-  renderNotificationBadge();
-}
-
-function renderNotificationBadge() {
-  const count = (state.notifications || state.account?.social?.notifications || []).length;
-  if (!els.notificationsBtn) return;
-  els.notificationsBtn.hidden = !state.account;
-  if (els.notificationsBadge) {
-    els.notificationsBadge.hidden = count <= 0;
-    els.notificationsBadge.textContent = count > 99 ? "99+" : String(count);
-  }
-  els.notificationsBtn.classList.toggle("hasNotifications", count > 0);
-}
-
-async function loadNotifications() {
-  if (!state.authToken) return;
-  const res = await fetch("/api/me/notifications", { headers: authHeaders(), cache: "no-store" });
-  const json = await res.json();
-  if (!res.ok || !json?.ok) throw new Error(json?.error || "Could not load notifications.");
-  state.notifications = json.notifications || [];
-  if (json.user) state.account = json.user;
-  saveAccountSession();
-  renderAccountUI();
-}
-
-function renderNotifications() {
-  const list = els.notificationsList;
-  if (!list) return;
-  const notes = state.notifications || [];
-  list.innerHTML = notes.length
-    ? notes
-        .map((n) => {
-          const actions =
-            n.type === "friendRequest"
-              ? `<button class="acceptNotificationBtn primaryBtn" data-note-id="${escapeAttr(n.id)}" type="button">Accept</button>
-                 <button class="dismissNotificationBtn" data-note-id="${escapeAttr(n.id)}" type="button">Dismiss</button>`
-              : `<button class="dismissNotificationBtn" data-note-id="${escapeAttr(n.id)}" type="button">Dismiss</button>`;
-          return `<div class="notificationItem">
-            <div>
-              <strong>${escapeHtml(n.fromUsername || "Player")}</strong>
-              <span>${escapeHtml(n.message || "Notification")}</span>
-            </div>
-            <div class="notificationActions">${actions}</div>
-          </div>`;
-        })
-        .join("")
-    : `<div class="emptyServers">No notifications.</div>`;
-}
-
-async function openNotifications() {
-  if (!state.account) return openProfileModal();
-  if (!els.notificationsModal) return;
-  els.notificationsModal.hidden = false;
-  try {
-    await loadNotifications();
-  } catch (err) {
-    logLine(`<strong>Notifications</strong>: ${escapeHtml(err.message || "Could not load notifications.")}`);
-  }
-  renderNotifications();
-}
-
-function closeNotifications() {
-  if (els.notificationsModal) els.notificationsModal.hidden = true;
-}
-
-async function acceptNotification(id) {
-  const res = await fetch(`/api/me/notifications/${encodeURIComponent(id)}/accept`, { method: "POST", headers: authHeaders() });
-  const json = await res.json();
-  if (!res.ok || !json?.ok) throw new Error(json?.error || "Could not accept notification.");
-  state.notifications = json.notifications || [];
-  if (json.user) state.account = json.user;
-  saveAccountSession();
-  renderAccountUI();
-  renderNotifications();
-  if (els.profileModal && !els.profileModal.hidden) renderProfile();
-}
-
-async function dismissNotification(id) {
-  const res = await fetch(`/api/me/notifications/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
-  const json = await res.json();
-  if (!res.ok || !json?.ok) throw new Error(json?.error || "Could not dismiss notification.");
-  state.notifications = json.notifications || [];
-  if (json.user) state.account = json.user;
-  saveAccountSession();
-  renderAccountUI();
-  renderNotifications();
+  notificationsUi.renderBadge();
 }
 
 function openAuthModal(mode = "login") {
@@ -1727,11 +1645,38 @@ function statTile(label, value) {
   return `<div><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
+const clubsUi = window.ChaosChessClubsUi.create({
+  state,
+  authHeaders,
+  avatarMarkup,
+  escapeAttr,
+  escapeHtml,
+  logLine,
+  n,
+  renderProfile,
+  saveAccountSession,
+  statTile,
+});
+
+const notificationsUi = window.ChaosChessNotificationsUi.create({
+  state,
+  els,
+  authHeaders,
+  escapeAttr,
+  escapeHtml,
+  logLine,
+  openProfileModal,
+  renderAccountUI,
+  renderProfile,
+  saveAccountSession,
+});
+
 function renderProfileTab(user, tab, winRate, readOnly = false) {
   const s = user.stats || {};
   if (tab === "stats") return renderStatsTab(user, winRate);
   if (tab === "history") return renderHistoryTab(user);
   if (tab === "rules") return renderRulesTab(user);
+  if (tab === "clubs") return clubsUi.renderTab(user, readOnly);
   if (tab === "cosmetics") return renderCosmeticsTab(user);
   if (tab === "achievements") return renderAchievementsTab(user);
   if (tab === "settings") return renderSettingsTab(user);
@@ -5243,7 +5188,7 @@ socket.on("social:state", (payload) => {
     saveAccountSession();
   }
   renderAccountUI();
-  if (els.notificationsModal && !els.notificationsModal.hidden) renderNotifications();
+  if (els.notificationsModal && !els.notificationsModal.hidden) notificationsUi.renderList();
 });
 
 socket.on("social:challenge", (invite) => {
@@ -5259,7 +5204,7 @@ socket.on("social:challengeDeclined", (payload) => {
 
 socket.on("lobby:challengeStarted", (payload) => {
   if (!payload?.ok) return;
-  closeNotifications();
+  notificationsUi.close();
   closeProfileModal();
   enterLobby({ code: payload.code, playerId: payload.playerId, color: payload.color });
 });
@@ -5308,17 +5253,17 @@ els.rulebookModal?.addEventListener("mousedown", (ev) => {
 });
 
 els.profileBtn?.addEventListener("click", () => openProfileModal());
-els.notificationsBtn?.addEventListener("click", () => openNotifications());
-els.notificationsCloseBtn?.addEventListener("click", () => closeNotifications());
+els.notificationsBtn?.addEventListener("click", () => notificationsUi.open());
+els.notificationsCloseBtn?.addEventListener("click", () => notificationsUi.close());
 els.notificationsModal?.addEventListener("mousedown", (ev) => {
-  if (ev.target === els.notificationsModal) closeNotifications();
+  if (ev.target === els.notificationsModal) notificationsUi.close();
 });
 els.notificationsList?.addEventListener("click", async (ev) => {
   const acceptBtn = ev.target.closest(".acceptNotificationBtn");
   const dismissBtn = ev.target.closest(".dismissNotificationBtn");
   try {
-    if (acceptBtn) await acceptNotification(acceptBtn.dataset.noteId);
-    if (dismissBtn) await dismissNotification(dismissBtn.dataset.noteId);
+    if (acceptBtn) await notificationsUi.accept(acceptBtn.dataset.noteId);
+    if (dismissBtn) await notificationsUi.dismiss(dismissBtn.dataset.noteId);
   } catch (err) {
     logLine(`<strong>Notifications</strong>: ${escapeHtml(err.message || "Notification action failed.")}`);
   }
@@ -5332,6 +5277,10 @@ els.profileTabs?.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-tab]");
   if (!btn) return;
   state.profileTab = btn.dataset.tab || "overview";
+  if (state.profileTab === "clubs" && !state.viewedProfileReadOnly) {
+    clubsUi.bindProfileTabLoad();
+    return;
+  }
   renderProfile();
 });
 els.profileContent?.addEventListener("click", (ev) => {
@@ -5341,6 +5290,15 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (target?.id === "changePasswordBtn") changePassword();
   if (target?.id === "campaignResetProfileBtn") resetCampaignProgress();
   if (target?.id === "addFriendBtn") addFriend();
+  if (target?.id === "refreshClubsBtn") clubsUi.load().then(() => renderProfile()).catch((err) => { state.clubStatus = err.message || "Could not load clubs."; renderProfile(); });
+  if (target?.id === "createClubBtn") clubsUi.createClub();
+  if (target?.id === "backToClubsBtn") { state.activeClub = null; renderProfile(); }
+  if (target?.id === "postClubAnnouncementBtn") {
+    const text = document.getElementById("clubAnnouncementInput")?.value || "";
+    clubsUi.action(`/api/clubs/${encodeURIComponent(target.dataset.clubId)}/announcements`, { body: { text } }).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Announcement failed.")}`));
+  }
+  if (target?.id === "leaveClubBtn") clubsUi.action(`/api/clubs/${encodeURIComponent(target.dataset.clubId)}/leave`).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Leave failed.")}`));
+  if (target?.id === "deleteClubBtn" && confirm("Delete this club permanently?")) clubsUi.action(`/api/clubs/${encodeURIComponent(target.dataset.clubId)}`, { method: "DELETE" }).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Delete failed.")}`));
   const friendBtn = target?.closest?.(".sendFriendRequestBtn");
   if (friendBtn?.dataset.username) sendFriendRequest(friendBtn.dataset.username);
   const challengeBtn = target?.closest?.(".challengeUserBtn");
@@ -5349,6 +5307,20 @@ els.profileContent?.addEventListener("click", (ev) => {
   if (unfriendBtn?.dataset.username) unfriendUser(unfriendBtn.dataset.username);
   const friendProfileBtn = target?.closest?.(".friendProfileBtn");
   if (friendProfileBtn?.dataset.username) openUserProfileByName(friendProfileBtn.dataset.username);
+  const openClubBtn = target?.closest?.(".openClubBtn");
+  if (openClubBtn?.dataset.clubId) clubsUi.open(openClubBtn.dataset.clubId).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Open failed.")}`));
+  const requestClubBtn = target?.closest?.(".requestClubBtn");
+  if (requestClubBtn?.dataset.clubId) clubsUi.requestJoin(requestClubBtn.dataset.clubId).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Request failed.")}`));
+  const acceptClubBtn = target?.closest?.(".acceptClubRequestBtn");
+  if (acceptClubBtn) clubsUi.action(`/api/clubs/${encodeURIComponent(acceptClubBtn.dataset.clubId)}/requests/${encodeURIComponent(acceptClubBtn.dataset.userId)}/accept`).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Accept failed.")}`));
+  const denyClubBtn = target?.closest?.(".denyClubRequestBtn");
+  if (denyClubBtn) clubsUi.action(`/api/clubs/${encodeURIComponent(denyClubBtn.dataset.clubId)}/requests/${encodeURIComponent(denyClubBtn.dataset.userId)}/deny`).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Deny failed.")}`));
+  const promoteClubBtn = target?.closest?.(".promoteClubMemberBtn");
+  if (promoteClubBtn) clubsUi.action(`/api/clubs/${encodeURIComponent(promoteClubBtn.dataset.clubId)}/members/${encodeURIComponent(promoteClubBtn.dataset.userId)}/promote`).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Promote failed.")}`));
+  const demoteClubBtn = target?.closest?.(".demoteClubMemberBtn");
+  if (demoteClubBtn) clubsUi.action(`/api/clubs/${encodeURIComponent(demoteClubBtn.dataset.clubId)}/members/${encodeURIComponent(demoteClubBtn.dataset.userId)}/demote`).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Demote failed.")}`));
+  const removeClubBtn = target?.closest?.(".removeClubMemberBtn");
+  if (removeClubBtn) clubsUi.action(`/api/clubs/${encodeURIComponent(removeClubBtn.dataset.clubId)}/members/${encodeURIComponent(removeClubBtn.dataset.userId)}`, { method: "DELETE" }).catch((err) => logLine(`<strong>Club</strong>: ${escapeHtml(err.message || "Remove failed.")}`));
   if (target?.id === "openRuleAppendixBtn") openRulebook();
   if (target?.id === "deleteAccountBtn") deleteAccount();
   if (target?.id === "adminLoadFlagsBtn") adminLoadFlags();
@@ -5696,7 +5668,7 @@ setInterval(() => {
 
 setInterval(() => {
   if (!state.authToken || !state.account) return;
-  loadNotifications().catch(() => {});
+  notificationsUi.load().catch(() => {});
 }, 15000);
 
 // Fallback sync: if we haven't seen a state update recently, request one.
