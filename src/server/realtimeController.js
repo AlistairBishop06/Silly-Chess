@@ -284,12 +284,15 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
         : null;
       const normalizedCampaignLevel =
         Number.isFinite(Number(campaignLevel)) && Number(campaignLevel) > 0 ? Math.floor(Number(campaignLevel)) : null;
-      const campaign = ensureCampaignProgress(account);
-      if (normalizedCampaignLevel && normalizedCampaignLevel > (campaign.highestUnlockedLevel || 1)) {
-        return cb?.({ ok: false, error: "That campaign level is locked." });
+      let filteredPool = requestedPool;
+      if (normalizedCampaignLevel) {
+        const campaign = ensureCampaignProgress(account);
+        if (normalizedCampaignLevel > (campaign.highestUnlockedLevel || 1)) {
+          return cb?.({ ok: false, error: "That campaign level is locked." });
+        }
+        const singleplayerPool = uniqueStrings(campaign.unlockedRuleIds || []).filter((id) => knownRuleIds.has(id));
+        filteredPool = requestedPool && requestedPool.length ? requestedPool : singleplayerPool;
       }
-      const singleplayerPool = uniqueStrings(campaign.unlockedRuleIds || []).filter((id) => knownRuleIds.has(id));
-      const filteredPool = singleplayerPool.length ? singleplayerPool : requestedPool;
       room.game = new Game({
         roomCode: code,
         debugMode: runtimeFlags.debugMode,
@@ -398,6 +401,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
       "game:supermarketPurchase": (game, playerId, { items }) => game.submitSupermarketPurchase(playerId, items),
       "game:fruitMachineSpin": (game, playerId) => game.submitFruitMachineSpin(playerId),
       "game:fruitMachineCollect": (game, playerId) => game.collectFruitMachinePrizes(playerId),
+      "game:boardPopupChoice": (game, playerId, { choiceId }) => game.submitBoardPopupChoice(playerId, choiceId),
       "game:rpsChoice": (game, playerId, { choice }) => game.submitRpsChoice(playerId, choice),
       "game:wagerSelection": (game, playerId, { squares }) => game.setWagerSelection(playerId, squares),
       "game:wagerConfirm": (game, playerId) => game.confirmWager(playerId),

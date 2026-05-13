@@ -42,6 +42,11 @@ const state = {
   fruitMachineLeverPull: 0,
   ads: [],
   nextAdAt: 0,
+  boardPopupKey: null,
+  prizeWheelSpinKey: null,
+  prizeWheelSpinning: false,
+  prizeWheelCollectKey: null,
+  termsScrollReadyKey: null,
   authToken: null,
   account: null,
   notifications: [],
@@ -248,6 +253,7 @@ function reviewFingerprint(s) {
     fans: s?.fans || [],
     supermarkets: s?.supermarkets || [],
     fruitMachines: s?.fruitMachines || [],
+    boardObjects: s?.boardObjects || {},
     lastMoveSquares: s?.lastMoveSquares || [],
   });
 }
@@ -3095,6 +3101,14 @@ function drawBoardEffects(s, t) {
   for (const sq of s.hazards?.asteroid || []) drawAsteroidTile(sq, t);
   for (const market of s.supermarkets || []) drawSupermarketTile(market.square, t);
   for (const machine of s.fruitMachines || []) drawFruitMachineTile(machine.square, t);
+  const objects = s.boardObjects || {};
+  for (const item of objects.parkingMeters || []) drawBoardObjectTile(item.square, t, "meter");
+  for (const item of objects.vendingMachines || []) drawBoardObjectTile(item.square, t, "vend");
+  for (const item of objects.portaloos || []) drawBoardObjectTile(item.square, t, "loo");
+  for (const item of objects.lostPropertyOffices || []) drawBoardObjectTile(item.square, t, "lost");
+  for (const item of objects.roadworksCones || []) drawBoardObjectTile(item.square, t, "cone");
+  for (const item of objects.fountains || []) drawBoardObjectTile(item.square, t, "fountain");
+  for (const item of objects.complaintDepartments || []) drawBoardObjectTile(item.square, t, "complaint");
   for (const fan of s.fans || []) drawFanVisual(fan, t);
 }
 
@@ -3215,6 +3229,175 @@ function drawFruitMachineTile(sq, t) {
     ctx.beginPath();
     ctx.arc(x + size * 0.345, y - size * 0.22, size * 0.055, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawBoardObjectTile(sq, t, kind) {
+  const config = {
+    meter: { color: "#ffd166", glow: "rgba(255, 209, 102, 0.18)" },
+    vend: { color: "#24d6c8", glow: "rgba(36, 214, 200, 0.18)" },
+    loo: { color: "#7bd3ff", glow: "rgba(123, 211, 255, 0.18)" },
+    lost: { color: "#fff7e8", glow: "rgba(255, 247, 232, 0.16)" },
+    cone: { color: "#ff8a3d", glow: "rgba(255, 138, 61, 0.20)" },
+    fountain: { color: "#60f0ff", glow: "rgba(96, 240, 255, 0.18)" },
+    complaint: { color: "#ff4f8b", glow: "rgba(255, 79, 139, 0.18)" },
+  }[kind];
+  if (!config) return;
+  drawTileGlyph(sq, (x, y, size) => {
+    const pulse = 0.5 + Math.sin(t / 260 + sq) * 0.5;
+    ctx.save();
+    ctx.fillStyle = config.glow;
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = Math.max(2, size * 0.025);
+    ctx.beginPath();
+    ctx.arc(x, y, size * (0.42 + pulse * 0.035), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (kind === "meter") {
+      ctx.fillStyle = "#273248";
+      ctx.strokeStyle = "#fff7e8";
+      ctx.lineWidth = Math.max(2, size * 0.025);
+      ctx.beginPath();
+      ctx.roundRect(x - size * 0.18, y - size * 0.34, size * 0.36, size * 0.46, size * 0.06);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath();
+      ctx.arc(x, y - size * 0.18, size * 0.11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#111827";
+      ctx.lineWidth = Math.max(2, size * 0.018);
+      ctx.beginPath();
+      ctx.moveTo(x, y - size * 0.18);
+      ctx.lineTo(x + Math.cos(t / 500) * size * 0.08, y - size * 0.18 + Math.sin(t / 500) * size * 0.08);
+      ctx.stroke();
+      ctx.fillStyle = "#c8d2ea";
+      ctx.fillRect(x - size * 0.035, y + size * 0.12, size * 0.07, size * 0.24);
+      ctx.fillStyle = "#111827";
+      ctx.font = `900 ${Math.floor(size * 0.13)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("P", x, y + size * 0.005);
+    } else if (kind === "vend") {
+      ctx.fillStyle = "#143447";
+      ctx.strokeStyle = "#24d6c8";
+      ctx.lineWidth = Math.max(2, size * 0.025);
+      ctx.beginPath();
+      ctx.roundRect(x - size * 0.28, y - size * 0.36, size * 0.56, size * 0.72, size * 0.055);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#fff7e8";
+      ctx.fillRect(x - size * 0.19, y - size * 0.24, size * 0.23, size * 0.36);
+      ctx.fillStyle = "#ff4f8b";
+      ctx.fillRect(x + size * 0.09, y - size * 0.21, size * 0.1, size * 0.07);
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(x + size * 0.09, y - size * 0.08, size * 0.1, size * 0.07);
+      ctx.fillStyle = "#24d6c8";
+      ctx.fillRect(x + size * 0.09, y + size * 0.05, size * 0.1, size * 0.07);
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(x - size * 0.18, y + size * 0.17, size * 0.36, size * 0.055);
+      ctx.fillStyle = "#ffd166";
+      ctx.font = `900 ${Math.floor(size * 0.11)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText("SNAX", x, y - size * 0.305);
+    } else if (kind === "loo") {
+      ctx.fillStyle = "#2472c7";
+      ctx.strokeStyle = "#c8f5ff";
+      ctx.lineWidth = Math.max(2, size * 0.025);
+      ctx.beginPath();
+      ctx.roundRect(x - size * 0.25, y - size * 0.34, size * 0.5, size * 0.68, size * 0.08);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#7bd3ff";
+      ctx.fillRect(x - size * 0.15, y - size * 0.23, size * 0.3, size * 0.16);
+      ctx.fillStyle = "#111827";
+      ctx.font = `900 ${Math.floor(size * 0.1)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText("WC", x, y - size * 0.145);
+      ctx.fillStyle = "#1b4d8a";
+      ctx.fillRect(x - size * 0.03, y - size * 0.02, size * 0.06, size * 0.32);
+      ctx.beginPath();
+      ctx.arc(x + size * 0.12, y + size * 0.05, size * 0.025, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffd166";
+      ctx.fill();
+    } else if (kind === "lost") {
+      ctx.fillStyle = "#8b5a2b";
+      ctx.strokeStyle = "#fff7e8";
+      ctx.lineWidth = Math.max(2, size * 0.025);
+      ctx.beginPath();
+      ctx.roundRect(x - size * 0.32, y - size * 0.13, size * 0.64, size * 0.36, size * 0.055);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(x - size * 0.22, y - size * 0.21, size * 0.44, size * 0.08);
+      ctx.fillStyle = "#fff7e8";
+      ctx.font = `900 ${Math.floor(size * 0.18)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("?", x, y + size * 0.035);
+      ctx.fillStyle = "#24d6c8";
+      ctx.beginPath();
+      ctx.arc(x + size * 0.24, y - size * 0.2, size * 0.055, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === "cone") {
+      ctx.fillStyle = "#ff8a3d";
+      ctx.beginPath();
+      ctx.moveTo(x, y - size * 0.28);
+      ctx.lineTo(x - size * 0.24, y + size * 0.24);
+      ctx.lineTo(x + size * 0.24, y + size * 0.24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#fff7e8";
+      ctx.lineWidth = Math.max(2, size * 0.02);
+      ctx.stroke();
+      ctx.fillStyle = "#fff7e8";
+      ctx.fillRect(x - size * 0.14, y + size * 0.02, size * 0.28, size * 0.05);
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(x - size * 0.24, y + size * 0.25, size * 0.48, size * 0.06);
+    } else if (kind === "fountain") {
+      ctx.fillStyle = "#425a76";
+      ctx.strokeStyle = "#c8f5ff";
+      ctx.lineWidth = Math.max(2, size * 0.025);
+      ctx.beginPath();
+      ctx.ellipse(x, y + size * 0.22, size * 0.34, size * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#60f0ff";
+      ctx.beginPath();
+      ctx.ellipse(x, y + size * 0.18, size * 0.24, size * 0.07, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#60f0ff";
+      ctx.lineWidth = Math.max(2, size * 0.032);
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.arc(x + i * size * 0.08, y - size * 0.02, size * (0.18 + pulse * 0.02), Math.PI * 1.12, Math.PI * 1.88);
+        ctx.stroke();
+      }
+    } else if (kind === "complaint") {
+      ctx.fillStyle = "#fff7e8";
+      ctx.strokeStyle = "#ff4f8b";
+      ctx.lineWidth = Math.max(2, size * 0.026);
+      ctx.beginPath();
+      ctx.roundRect(x - size * 0.31, y - size * 0.25, size * 0.62, size * 0.42, size * 0.06);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - size * 0.1, y + size * 0.17);
+      ctx.lineTo(x - size * 0.2, y + size * 0.29);
+      ctx.lineTo(x + size * 0.02, y + size * 0.17);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#111827";
+      ctx.font = `900 ${Math.floor(size * 0.22)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("!", x, y - size * 0.04);
+    }
     ctx.restore();
   });
 }
@@ -3415,6 +3598,391 @@ function renderFruitMachine() {
   }
   scheduleFruitMachineRerender();
   if (machine.complete && yourMachine && !isFruitMachineAnimating()) collectFruitMachinePrizes();
+}
+
+function submitBoardPopup(choiceId, extra = {}) {
+  if (!state.lobby || !state.playerId) return;
+  socket.emit("game:boardPopupChoice", { code: state.lobby, playerId: state.playerId, choiceId, ...extra }, (res) => {
+    if (!res?.ok) logLine(`<strong>Popup</strong>: ${escapeHtml(res?.error || "choice failed")}`);
+    socket.emit("game:sync", { code: state.lobby, playerId: state.playerId });
+  });
+}
+
+const PRIZE_WHEEL_SEGMENTS = [
+  { id: "pawn", label: "Pawn" },
+  { id: "block", label: "Block" },
+  { id: "hazard", label: "Lava" },
+  { id: "shield", label: "Shield" },
+  { id: "swap", label: "Swap" },
+  { id: "deletePawn", label: "Delete" },
+];
+const PRIZE_WHEEL_SETTLE_MS = 3600;
+const PRIZE_WHEEL_REVEAL_MS = 2000;
+
+function popupToyHtml(popup, yourPopup) {
+  const square = popup.square == null ? "Popup event" : `Board stop: ${algebraic(popup.square)}`;
+  const intro = `
+    <div class="boardPopupIntro">
+      <div class="popupToy ${escapeHtml(popup.kind || "default")}">
+        ${popupToyFigureHtml(popup.kind)}
+      </div>
+      <div>
+        <strong>${escapeHtml(yourPopup ? "Choose an option" : "Waiting for opponent")}</strong>
+        <span>${escapeHtml(square)}</span>
+      </div>
+    </div>
+  `;
+
+  if (popup.kind === "vendingMachine") {
+    const snackMeta = {
+      shield: { icon: "S", color: "pink" },
+      promote: { icon: "^", color: "gold" },
+      duplicate: { icon: "2", color: "teal" },
+    };
+    const options = popup.options || [];
+    const shelves = options.map((option, index) => ({
+      ...option,
+      slot: ["A1", "B2", "C3"][index] || String(index + 1),
+      ...(snackMeta[option.id] || { icon: "?", color: "gold" }),
+    }));
+    return `
+      <div class="vendingStage">
+        <div class="vendingMachinePopup">
+          <div class="vendingMarquee">SNAX-O-MATIC</div>
+          <div class="vendingWindow">
+            ${shelves.map((item) => {
+              return `
+                <div class="vendingSnack snack-${item.color}">
+                  <span>${escapeHtml(item.icon)}</span>
+                  <small>${escapeHtml(item.label || item.slot)}</small>
+                </div>
+              `;
+            }).join("")}
+          </div>
+          <div class="vendingPanel">
+            <div class="vendingCoinSlot"></div>
+            ${options.map((option, index) => `
+              <button class="vendingChoiceButton" type="button" data-board-popup-choice="${escapeAttr(option.id)}" ${yourPopup ? "" : "disabled"}>
+                <b>${escapeHtml(["A1", "B2", "C3"][index] || String(index + 1))}</b>
+                <span>${escapeHtml(option.label)}</span>
+              </button>
+            `).join("")}
+          </div>
+          <div class="vendingChute">${escapeHtml(yourPopup ? "PRESS A BUTTON" : "WAITING")}</div>
+        </div>
+        <div class="vendingReceipt">
+          <strong>${escapeHtml(yourPopup ? "Choose your snack" : "Opponent is choosing")}</strong>
+          <span>${escapeHtml(square)}</span>
+          <small>${escapeHtml(popup.status || "")}</small>
+        </div>
+      </div>
+    `;
+  }
+
+if (popup.kind === "terms") {
+return `
+${intro} <div class="termsScroll"> <div class="termsStamp">BOARD AGREEMENT</div>
+  <p><b>Section 1:</b> By continuing, you agree that all chess pieces, snacks, invoices, teleporting toilets, office stamps, suspicious fountains, and wheel-based prizes are provided as-is.</p>
+
+  <p><b>Section 2:</b> The board may become inconvenient without notice. Inconvenience includes, but is not limited to, lava, sticky squares, clamping, paperwork, surprise pawns, decorative hazards, low ceilings, enchanted carpeting, and sudden emotional support geese.</p>
+
+  <p><b>Section 3:</b> Vending machines may contain queens, duplicated pawns, expired crisps, or a button that looks important because it is red.</p>
+
+  <p><b>Section 4:</b> Parking meters are licensed to judge your pieces. Kicking a meter may void your warranty, your pawn structure, or both.</p>
+
+  <p><b>Section 5:</b> The Complaint Department promises to consider all complaints in the order most amusing to the department.</p>
+
+  <p><b>Section 6:</b> Declining this agreement is permitted under the ancient loophole, but the board may charge a pawn processing fee.</p>
+
+  <p><b>Section 7:</b> By pressing a button below, you confirm that you did not read all of this, except somehow you did.</p>
+
+  <p><b>Section 8:</b> Castling near wet floor signs is discouraged unless supervised by a certified bishop.</p>
+
+  <p><b>Section 9:</b> The company is not liable for injuries caused by aggressive rooks, dramatic queens, emotionally distant knights, or bishops travelling diagonally with suspicious confidence.</p>
+
+  <p><b>Section 10:</b> Some pawns may contain small parts and should not be microwaved.</p>
+
+  <p><b>Section 11:</b> Any player caught summoning extra horses without a permit may be reassigned to Accounting.</p>
+
+  <p><b>Section 12:</b> The board reserves the right to become haunted after midnight, during eclipses, or whenever someone says “surely this move is safe.”</p>
+
+  <p><b>Section 13:</b> Pieces entering lava zones do so voluntarily and may emerge toasted, upgraded, or mildly annoyed.</p>
+
+  <p><b>Section 14:</b> In the event of a temporal incident, duplicated players must form an orderly queue according to beard length.</p>
+
+  <p><b>Section 15:</b> The Emergency Queen may only be broken out of glass during situations classified as “extremely tactical.”</p>
+
+  <p><b>Section 16:</b> Glitter explosions are considered cosmetic and therefore legally harmless.</p>
+
+  <p><b>Section 17:</b> The use of counterfeit bishops made from painted traffic cones is strictly prohibited.</p>
+
+  <p><b>Section 18:</b> All chairs near the board are decorative unless proven otherwise.</p>
+
+  <p><b>Section 19:</b> If the board begins humming softly, remain calm and avoid eye contact with the corners.</p>
+
+  <p><b>Section 20:</b> Pawns promoted through unofficial means may experience dizziness, confidence issues, or temporary celebrity status.</p>
+
+  <p><b>Section 21:</b> The Rules Committee operates from a hidden bunker beneath the car park and cannot be contacted directly due to ongoing stationery negotiations.</p>
+
+  <p><b>Section 22:</b> Players acknowledge that every button on the interface performs at least one action and at most several regrettable actions.</p>
+
+  <p><b>Section 23:</b> The phrase “how bad could it be?” automatically waives your right to legal protection.</p>
+
+  <p><b>Section 24:</b> In some jurisdictions, bishops are classified as gardening equipment.</p>
+
+  <p><b>Section 25:</b> Neutral block pieces may contain traces of nuts, bees, bureaucracy, and compressed screaming.</p>
+
+  <p><b>Section 26:</b> Any square glowing ominously is considered premium content.</p>
+
+  <p><b>Section 27:</b> Time-reversal incidents may result in repeated paperwork. Please retain all receipts from previous timelines.</p>
+
+  <p><b>Section 28:</b> Capturing your own piece “for the bit” is strongly discouraged by health professionals.</p>
+
+  <p><b>Section 29:</b> The board occasionally experiments with gravity. Management apologises for any falling queens.</p>
+
+  <p><b>Section 30:</b> Certain rules may have been translated from ancient tablets, napkins, or the back of a takeaway menu.</p>
+
+  <p><b>Section 31:</b> If a knight begins speaking, do not encourage it.</p>
+
+  <p><b>Section 32:</b> Unauthorised use of portals, wormholes, ladders, trapdoors, emergency tunnels, or “the funny pipe” is forbidden.</p>
+
+  <p><b>Section 33:</b> The board may occasionally rotate for dramatic effect. Drinks should be secured beforehand.</p>
+
+  <p><b>Section 34:</b> All explosions are subject to availability.</p>
+
+  <p><b>Section 35:</b> The company does not guarantee that squares labelled “safe” are, in fact, safe.</p>
+
+  <p><b>Section 36:</b> Players experiencing smoke, sparks, or prophetic visions should contact a nearby attendant.</p>
+
+  <p><b>Section 37:</b> Entering sudden death overtime may summon additional paperwork entities.</p>
+
+  <p><b>Section 38:</b> The use of magnets, telepathy, bribery, or interpretive dance to influence the board is prohibited during weekdays.</p>
+
+  <p><b>Section 39:</b> Every rook contains approximately three metres of emotional baggage.</p>
+
+  <p><b>Section 40:</b> Warning signs are placed according to aesthetic principles rather than practical safety concerns.</p>
+
+  <p><b>Section 41:</b> In emergencies, follow illuminated exit signs unless they begin moving.</p>
+
+  <p><b>Section 42:</b> By remaining on the board longer than seven turns, you consent to being observed by the Department of Extremely Specific Statistics.</p>
+
+  <p><b>Section 43:</b> The board may generate random paperwork requiring signatures, initials, stamps, or a dramatic flourish.</p>
+
+  <p><b>Section 44:</b> Knights upgraded into “Executive Knights” may demand meetings.</p>
+
+  <p><b>Section 45:</b> Any attempt to read every section of this agreement in full automatically classifies you as suspicious.</p>
+
+  <p><b>Section 46:</b> Side effects of gameplay may include overconfidence, tactical confusion, attachment to pawns, and shouting “NO WAY” at approximately 2am.</p>
+
+  <p><b>Section 47:</b> The company reserves the right to add more sections whenever it feels like it.</p>
+
+  <p><b>Section 48:</b> Some rules may become sentient during thunderstorms.</p>
+
+  <p><b>Section 49:</b> The existence of a section numbered 49 should not be interpreted as reassurance that anyone is in control.</p>
+
+  <p><b>Section 50:</b> Congratulations on reaching the end of the agreement. You are now legally classified as “probably informed.”</p>
+  <p><b>Section 51:</b> Any pawn requesting a manager must first complete form PAWN-7 in blue ink, black ink, or heroic crayon.</p>
+  <p><b>Section 52:</b> Fountains are not wish-granting devices unless they have been recently polished and are feeling generous.</p>
+  <p><b>Section 53:</b> A button labelled “definitely harmless” should be treated as neither definite nor harmless.</p>
+  <p><b>Section 54:</b> Auction bids paid in vibes, compliments, IOUs, or mysterious envelopes will be rounded down to zero.</p>
+  <p><b>Section 55:</b> Any player who reads this far may be asked to initial the board, the air above the board, and one nearby receipt.</p>
+  <p><b>Section 56:</b> Teleported pieces may arrive with minor scuffs, new opinions, or an unexplained loyalty card.</p>
+  <p><b>Section 57:</b> The Lost Property Office is not responsible for returning dignity, tempo, initiative, or queens left unattended.</p>
+  <p><b>Section 58:</b> Roadworks cones are legally allowed to look smug after blocking an important square.</p>
+  <p><b>Section 59:</b> Customer surveys may be used to improve service, alter reality, or justify a suspiciously specific spreadsheet.</p>
+  <p><b>Section 60:</b> This agreement ends only when you reach the bottom, which is legally different from emotionally reaching the bottom.</p>
+  <div class="termsGate" data-terms-gate>Scroll to the bottom to unlock the buttons.</div>
+</div>
+`;
+}
+
+
+  if (popup.kind === "prizeWheel") {
+    const result = popup.data?.result || null;
+    const resultIndex = Math.max(0, PRIZE_WHEEL_SEGMENTS.findIndex((segment) => segment.id === result));
+    const rotation = 2160 - (resultIndex * 60 + 30);
+    const requesting = state.prizeWheelSpinning && !result;
+    const settling = !!result;
+    const labels = PRIZE_WHEEL_SEGMENTS.map((segment, i) => `<span class="${segment.id === result ? "is-winner" : ""}" style="--slice:${i}">${escapeHtml(segment.label)}</span>`).join("");
+    const resultLabel = PRIZE_WHEEL_SEGMENTS[resultIndex]?.label || "Mystery";
+    return `
+      <div class="wheelCabinet ${requesting ? "is-requesting" : ""} ${settling ? "is-settling" : ""}" style="--wheel-rotation:${rotation}deg;--wheel-duration:${PRIZE_WHEEL_SETTLE_MS}ms">
+        <div class="wheelPointer"></div>
+        <div class="prizeWheelVisual">${labels}<b>SPIN</b></div>
+        ${result ? `<div class="wheelResult">Landed on <strong>${escapeHtml(resultLabel)}</strong></div>` : ""}
+        <div class="wheelLegend">
+          ${PRIZE_WHEEL_SEGMENTS.map((segment) => `<span class="${segment.id === result ? "is-winner" : ""}">${escapeHtml(segment.label)}</span>`).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  if (popup.kind === "auction") {
+    const bids = popup.data?.bids || {};
+    return `
+      ${intro}
+      <div class="auctionStage">
+        <div class="auctionHammer"></div>
+        <div class="auctionLot">
+          <strong>${escapeHtml(popup.data?.lot?.label || "Mystery Lot")}</strong>
+          <span>${escapeHtml(popup.data?.lot?.detail || "Highest bid wins.")}</span>
+        </div>
+        <div class="auctionBids"><span>White: ${escapeHtml(String(bids.w ?? "-"))}</span><span>Black: ${escapeHtml(String(bids.b ?? "-"))}</span></div>
+      </div>
+    `;
+  }
+
+  if (popup.kind === "survey") {
+    return `
+      ${intro}
+      <div class="surveyStars" aria-hidden="true">
+        <span>*</span><span>*</span><span>*</span><span>*</span><span>*</span>
+      </div>
+    `;
+  }
+
+  return intro;
+}
+
+function popupToyFigureHtml(kind) {
+  if (kind === "parkingMeter") return `<i class="toyMeterDial"></i><b>P</b><em></em>`;
+  if (kind === "vendingMachine") return `<b>SNAX</b><i></i><span></span><span></span><span></span>`;
+  if (kind === "portaloo") return `<b>WC</b><i></i><em></em>`;
+  if (kind === "lostProperty") return `<b>?</b><i></i><em></em>`;
+  if (kind === "fountain") return `<i></i><i></i><i></i><b></b>`;
+  if (kind === "complaint") return `<b>!</b><i></i>`;
+  if (kind === "terms") return `<b>T&C</b><i></i><em></em>`;
+  if (kind === "survey") return `<b>*</b><i></i>`;
+  return `<b>!</b>`;
+}
+
+function spinPrizeWheelThenSubmit(choiceId) {
+  if (state.prizeWheelSpinning) return;
+  state.prizeWheelSpinning = true;
+  state.prizeWheelSpinKey = state.boardPopupKey;
+  state.prizeWheelCollectKey = null;
+  renderBoardPopup();
+  submitBoardPopup(choiceId);
+}
+
+function renderBoardPopup() {
+  const s = state.serverState;
+  const popup = s?.boardPopup;
+  const active = !!popup?.active && s?.phase === "boardPopup";
+  if (!els.boardPopupModal) return;
+  els.boardPopupModal.hidden = !active;
+  if (!active) {
+    state.boardPopupKey = null;
+    state.prizeWheelSpinKey = null;
+    state.prizeWheelSpinning = false;
+    state.prizeWheelCollectKey = null;
+    state.termsScrollReadyKey = null;
+    return;
+  }
+
+  const key = `${popup.kind}|${popup.playerId}|${popup.square ?? "none"}|${popup.stage || ""}|${JSON.stringify(popup.data || {})}`;
+  const samePopupKey = state.boardPopupKey === key;
+  if (!samePopupKey) {
+    state.boardPopupKey = key;
+    if (popup.kind !== "prizeWheel" || !popup.data?.spun) {
+      state.prizeWheelSpinKey = null;
+      state.prizeWheelSpinning = false;
+      state.prizeWheelCollectKey = null;
+    }
+    if (popup.kind === "terms") state.termsScrollReadyKey = null;
+  }
+  const yourPopup = popup.playerId === state.playerId;
+  if (popup.kind === "prizeWheel" && popup.data?.spun && popup.data?.result && yourPopup) {
+    state.prizeWheelSpinning = true;
+    state.prizeWheelSpinKey = key;
+    if (state.prizeWheelCollectKey !== key) {
+      state.prizeWheelCollectKey = key;
+      setTimeout(() => {
+        if (state.boardPopupKey === key) submitBoardPopup("collect");
+      }, PRIZE_WHEEL_SETTLE_MS + PRIZE_WHEEL_REVEAL_MS);
+    }
+  }
+  const card = els.boardPopupModal.querySelector(".boardPopupCard");
+  if (card) card.className = `modalCard boardPopupCard popup-${popup.kind || "default"}`;
+  if (els.boardPopupTitle) els.boardPopupTitle.textContent = popup.title || "Board Popup";
+  if (els.boardPopupBadge) els.boardPopupBadge.textContent = yourPopup ? "Your choice" : "Waiting";
+  if (els.boardPopupStatus) els.boardPopupStatus.textContent = yourPopup ? popup.status || "" : "Opponent is handling a popup.";
+  if (els.boardPopupSpecial) {
+    const keepTermsScroll = popup.kind === "terms" && samePopupKey && els.boardPopupSpecial.querySelector(".termsScroll");
+    if (!keepTermsScroll) {
+      els.boardPopupSpecial.innerHTML = popupToyHtml(popup, yourPopup);
+      els.boardPopupSpecial.querySelectorAll("[data-board-popup-choice]").forEach((btn) => {
+        btn.addEventListener("click", () => submitBoardPopup(btn.dataset.boardPopupChoice));
+      });
+      if (popup.kind === "lostProperty" && popup.pieces?.length) {
+        const wrap = document.createElement("div");
+        wrap.className = "lostPropertyGrid";
+        for (const piece of popup.pieces) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.disabled = !yourPopup;
+          btn.innerHTML = `<span>${escapeHtml(PIECE_GLYPH_MONO[piece.type] || piece.type.toUpperCase())}</span><small>${piece.color === "w" ? "White" : "Black"} lost item</small>`;
+          btn.addEventListener("click", () => submitBoardPopup(piece.id));
+          wrap.appendChild(btn);
+        }
+        els.boardPopupSpecial.appendChild(wrap);
+      }
+    }
+  }
+  if (els.boardPopupActions) {
+    const keepTermsActions = popup.kind === "terms" && samePopupKey && els.boardPopupActions.children.length;
+    if (!keepTermsActions) els.boardPopupActions.innerHTML = "";
+    if (popup.kind === "vendingMachine") return;
+    if (popup.kind === "lostProperty" && popup.pieces?.length) return;
+    if (!keepTermsActions) {
+      (popup.options || []).forEach((option, index) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "boardPopupChoice";
+        btn.style.setProperty("--choice-index", String(index));
+        btn.disabled = !yourPopup;
+        if (popup.kind === "terms" && state.termsScrollReadyKey !== key) btn.disabled = true;
+        btn.innerHTML = `
+          <span class="choiceDot"></span>
+          <strong>${escapeHtml(option.label)}</strong>
+          ${option.detail ? `<small>${escapeHtml(option.detail)}</small>` : ""}
+        `;
+        if (popup.kind === "prizeWheel" && option.id === "spin") {
+          btn.disabled = !yourPopup || state.prizeWheelSpinning;
+          btn.addEventListener("click", () => spinPrizeWheelThenSubmit(option.id));
+        } else if (popup.kind === "prizeWheel" && option.id === "collect") {
+          btn.disabled = true;
+        } else {
+          btn.addEventListener("click", () => submitBoardPopup(option.id));
+        }
+        els.boardPopupActions.appendChild(btn);
+      });
+    }
+  }
+  if (popup.kind === "terms" && els.boardPopupSpecial) {
+    const scroll = els.boardPopupSpecial.querySelector(".termsScroll");
+    const gate = els.boardPopupSpecial.querySelector("[data-terms-gate]");
+    const unlockTerms = () => {
+      if (!scroll) return;
+      const ready = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 6;
+      if (!ready) return;
+      state.termsScrollReadyKey = key;
+      if (gate) {
+        gate.textContent = yourPopup ? "Buttons unlocked. Choose wisely-ish." : "Opponent reached the end.";
+        gate.classList.add("is-ready");
+      }
+      if (els.boardPopupActions) {
+        els.boardPopupActions.querySelectorAll("button").forEach((btn) => {
+          btn.disabled = !yourPopup;
+        });
+      }
+    };
+    if (scroll && scroll.dataset.termsListenerKey !== key) {
+      scroll.dataset.termsListenerKey = key;
+      scroll.addEventListener("scroll", unlockTerms, { passive: true });
+    }
+    unlockTerms();
+  }
 }
 
 const AD_VARIANTS = [
@@ -3662,6 +4230,10 @@ function draw() {
         ? s.fruitMachine?.playerId === state.playerId
           ? "Pull the lever"
           : "Opponent spinning"
+      : s.phase === "boardPopup"
+        ? s.boardPopup?.playerId === state.playerId
+          ? (s.boardPopup.title || "Popup")
+          : "Opponent in popup"
       : s.phase === "rps"
         ? "RPS Duel!"
       : s.phase === "wager"
@@ -4763,6 +5335,17 @@ function closeCreateModal() {
   els.createModal.hidden = true;
 }
 
+function openSingleplayerModeModal() {
+  if (!ensureSignedIn()) return;
+  if (!els.singleplayerModeModal) return;
+  els.singleplayerModeModal.hidden = false;
+}
+
+function closeSingleplayerModeModal() {
+  if (!els.singleplayerModeModal) return;
+  els.singleplayerModeModal.hidden = true;
+}
+
 function createLobby(visibility) {
   if (!ensureSignedIn()) return;
   socket.emit("lobby:create", { authToken: state.authToken, visibility }, (res) => {
@@ -4780,6 +5363,7 @@ function createSingleplayer({ campaignLevel = null, rulePoolIds = null } = {}) {
   if (!ensureSignedIn()) return;
   socket.emit("lobby:singleplayer", { authToken: state.authToken, campaignLevel, rulePoolIds }, (res) => {
     if (!res?.ok) return logLine(`<strong>Error</strong>: ${escapeHtml(res?.error || "singleplayer failed")}`);
+    closeSingleplayerModeModal();
     state.activeCampaignLevel = Number.isFinite(Number(campaignLevel)) ? Math.floor(Number(campaignLevel)) : null;
     enterLobby({ code: res.code, playerId: res.playerId, color: res.color });
     refreshAccount();
@@ -4950,6 +5534,7 @@ function syncUI() {
     if (els.resultModal) els.resultModal.hidden = true;
     if (els.supermarketModal) els.supermarketModal.hidden = true;
     if (els.fruitMachineModal) els.fruitMachineModal.hidden = true;
+    if (els.boardPopupModal) els.boardPopupModal.hidden = true;
     stopConfetti();
     if (els.sideLabelTop) els.sideLabelTop.textContent = "";
     if (els.sideLabelBottom) els.sideLabelBottom.textContent = "";
@@ -4977,6 +5562,9 @@ function syncUI() {
   }
   if (s.fruitMachine?.active) {
     els.gameMsg.textContent = s.fruitMachine.playerId === state.playerId ? "Pull the fruit machine lever" : "Opponent is spinning the fruit machine";
+  }
+  if (s.boardPopup?.active) {
+    els.gameMsg.textContent = s.boardPopup.playerId === state.playerId ? s.boardPopup.title || "Handle popup" : "Opponent is handling a popup";
   }
   if (s.phase === "pawnSoldierShot") {
     els.gameMsg.textContent =
@@ -5010,6 +5598,7 @@ function syncUI() {
   renderWager();
   renderSupermarket();
   renderFruitMachine();
+  renderBoardPopup();
   renderMutant();
   updateReviewControls();
 
@@ -5383,6 +5972,17 @@ els.createBtn.addEventListener("click", () => {
 });
 
 els.singleplayerBtn?.addEventListener("click", () => {
+  openSingleplayerModeModal();
+});
+els.singleplayerModeCloseBtn?.addEventListener("click", () => closeSingleplayerModeModal());
+els.singleplayerModeModal?.addEventListener("mousedown", (ev) => {
+  if (ev.target === els.singleplayerModeModal) closeSingleplayerModeModal();
+});
+els.singleplayerFreePlayBtn?.addEventListener("click", () => {
+  createSingleplayer();
+});
+els.singleplayerCampaignBtn?.addEventListener("click", () => {
+  closeSingleplayerModeModal();
   openCampaignMap();
 });
 els.campaignBackBtn?.addEventListener("click", () => closeCampaignMap());

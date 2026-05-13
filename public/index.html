@@ -248,6 +248,18 @@
               </div>
             </div>
 
+            <div id="boardPopupModal" class="modal" hidden>
+              <div class="modalCard boardPopupCard">
+                <div class="cardsHeader">
+                  <h3 id="boardPopupTitle">Board Popup</h3>
+                  <div id="boardPopupBadge" class="timer"></div>
+                </div>
+                <div id="boardPopupStatus" class="modalDetail">-</div>
+                <div id="boardPopupSpecial" class="boardPopupSpecial"></div>
+                <div id="boardPopupActions" class="boardPopupActions"></div>
+              </div>
+            </div>
+
             <div id="mutantModal" class="modal" hidden>
               <div class="modalCard mutantCard">
                 <div class="cardsHeader">
@@ -321,6 +333,27 @@
           <button id="createPrivateBtn" class="createChoice" type="button">
             <strong>Private</strong>
             <span>Join only with the lobby code.</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="singleplayerModeModal" class="modal" hidden>
+      <div class="modalCard singleplayerModeCard">
+        <div class="cardsHeader">
+          <h3>Singleplayer</h3>
+          <div class="rulebookActions">
+            <button id="singleplayerModeCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="createChoiceGrid singleplayerChoiceGrid">
+          <button id="singleplayerFreePlayBtn" class="createChoice primaryBtn singleplayerChoice" type="button">
+            <strong>Free play</strong>
+            <span>Play Chaos Bot with every rule in the normal rotation.</span>
+          </button>
+          <button id="singleplayerCampaignBtn" class="createChoice singleplayerChoice" type="button">
+            <strong>Campaign</strong>
+            <span>Open the world map and unlock rules level by level.</span>
           </button>
         </div>
       </div>

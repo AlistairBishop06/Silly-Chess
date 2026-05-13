@@ -213,6 +213,42 @@ const RULES = [
     },
   },
   {
+    id: "inst_terms_conditions",
+    kind: "instant",
+    name: "Terms and Conditions",
+    description: "The opponent must accept a suspicious popup before play continues. The hidden decline loophole gives a shield but costs a pawn.",
+    apply(game, ctx) {
+      game.startTermsConditions?.(ctx?.playerId, ctx?.color);
+    },
+  },
+  {
+    id: "inst_customer_survey",
+    kind: "instant",
+    name: "Customer Survey",
+    description: "The opponent rates their latest board experience. Five stars grants a shield; one star refunds the last move if possible.",
+    apply(game, ctx) {
+      game.startCustomerSurvey?.(ctx?.playerId, ctx?.color);
+    },
+  },
+  {
+    id: "inst_prize_wheel",
+    kind: "instant",
+    name: "Prize Wheel",
+    description: "Spin a popup prize wheel for a random board reward or inconvenience.",
+    apply(game, ctx) {
+      game.startPrizeWheel?.(ctx?.playerId, ctx?.color);
+    },
+  },
+  {
+    id: "inst_auction_house",
+    kind: "instant",
+    name: "Auction House",
+    description: "Both players bid material in a popup auction. Winner buys a random lot.",
+    apply(game) {
+      game.startAuctionHouse?.();
+    },
+  },
+  {
     id: "inst_swap_queens",
     kind: "instant",
     name: "Queen Swap",
@@ -1172,6 +1208,32 @@ const RULES = [
     },
   },
   {
+    id: "del_vending_machine_4",
+    kind: "delayed",
+    delayTurns: 4,
+    name: "Vending Machine",
+    description: "In 4 turns, a vending machine appears on an empty square. First visitor picks one mystery snack popup.",
+    apply(game, ctx) {
+      const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addBoardObject?.("vendingMachines", { square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
+    id: "del_lost_property_5",
+    kind: "delayed",
+    delayTurns: 5,
+    name: "Lost Property Office",
+    description: "In 5 turns, a lost property desk opens. Landing there lets you reclaim one captured piece as your own.",
+    apply(game, ctx) {
+      const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addBoardObject?.("lostPropertyOffices", { square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
     id: "del_land_expansion_10",
     kind: "delayed",
     delayTurns: 10,
@@ -1200,6 +1262,19 @@ const RULES = [
     },
   },
   {
+    id: "dur_parking_meter_8",
+    kind: "duration",
+    durationTurns: 8,
+    name: "Parking Meter",
+    description: "For 8 turns, a parking meter appears. Landing there opens a pay/ignore/kick popup.",
+    apply(game, ctx) {
+      const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addBoardObject?.("parkingMeters", { square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
     id: "dur_supermarket_10",
     kind: "duration",
     durationTurns: 10,
@@ -1211,6 +1286,63 @@ const RULES = [
       if (sq == null) return;
       if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
       game.addSupermarket?.({ square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
+    id: "dur_portaloo_6",
+    kind: "duration",
+    durationTurns: 6,
+    name: "Portaloo",
+    description: "For 6 turns, a portaloo appears. Landing there can flush the piece to a random square with a random tier change.",
+    apply(game, ctx) {
+      const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addBoardObject?.("portaloos", { square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
+    id: "dur_roadworks_7",
+    kind: "duration",
+    durationTurns: 7,
+    name: "Roadworks",
+    description: "For 7 turns, three traffic cones appear as neutral blockers on empty squares.",
+    apply(game, ctx) {
+      const squares = [];
+      for (let i = 0; i < 3; i++) {
+        const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+        if (sq == null || squares.includes(sq)) continue;
+        squares.push(sq);
+        game.state.board[sq] = { type: "x", color: "x", moved: true, tags: ["roadCone"] };
+      }
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = squares[0] ?? null;
+      game.addRoadworks?.({ squares, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
+    id: "dur_fountain_6",
+    kind: "duration",
+    durationTurns: 6,
+    name: "The Fountain",
+    description: "For 6 turns, a fountain appears. Landing there opens a wish popup and splashes adjacent pieces away.",
+    apply(game, ctx) {
+      const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addBoardObject?.("fountains", { square: sq, instanceId: ctx?.inst?.instanceId || null });
+    },
+  },
+  {
+    id: "dur_complaint_department_8",
+    kind: "duration",
+    durationTurns: 8,
+    name: "Complaint Department",
+    description: "For 8 turns, a complaints desk appears. Landing there lets you undo one small annoyance.",
+    apply(game, ctx) {
+      const sq = game.randomEmptyBoardSquare?.() ?? randomEmptySquare(game);
+      if (sq == null) return;
+      if (ctx?.inst?.data) ctx.inst.data.targetSq = sq;
+      game.addBoardObject?.("complaintDepartments", { square: sq, instanceId: ctx?.inst?.instanceId || null });
     },
   },
   {

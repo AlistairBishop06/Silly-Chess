@@ -47,7 +47,7 @@ class Game {
 
     this.state = initialState();
     this.ply = 0;
-    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "mutantFusion" | "pawnSoldierShot" | "supermarket" | "rps" | "wager"
+    this.phase = "lobby"; // "lobby" | "play" | "ruleChoice" | "bonusRuleChoice" | "targetRule" | "mutantFusion" | "pawnSoldierShot" | "supermarket" | "fruitMachine" | "boardPopup" | "rps" | "wager"
 
     this.result = null;
     this.resultInfo = null;
@@ -83,6 +83,17 @@ class Game {
     this.supermarket = null;
     this.fruitMachines = [];
     this.fruitMachine = null;
+    this.boardObjects = {
+      parkingMeters: [],
+      vendingMachines: [],
+      portaloos: [],
+      lostPropertyOffices: [],
+      roadworksCones: [],
+      fountains: [],
+      complaintDepartments: [],
+    };
+    this.boardPopup = null;
+    this.capturedPieces = [];
 
     this.lastMoveSquares = [];
     this.moveList = [];
@@ -134,6 +145,7 @@ class Game {
           ? this.supermarkets.filter((market) => market.instanceId !== instanceId)
           : this.supermarkets.filter((market) => market.ruleId !== ruleId);
       }
+      this.removeBoardObjectsForRule(ruleId, inst?.instanceId || null);
     };
   }
 
@@ -161,6 +173,17 @@ class Game {
     this.wager = null;
     this.supermarket = null;
     this.fruitMachine = null;
+    this.boardPopup = null;
+    this.boardObjects = {
+      parkingMeters: [],
+      vendingMachines: [],
+      portaloos: [],
+      lostPropertyOffices: [],
+      roadworksCones: [],
+      fountains: [],
+      complaintDepartments: [],
+    };
+    this.capturedPieces = [];
     this.bonusRuleChoice = null;
     this.bonusRuleChoices = [];
     this.ruleChoicesByPlayerId = {};
@@ -197,6 +220,16 @@ class Game {
       this.stickySquares = new Set();
       this.supermarkets = [];
       this.fruitMachines = [];
+      this.boardObjects = {
+        parkingMeters: [],
+        vendingMachines: [],
+        portaloos: [],
+        lostPropertyOffices: [],
+        roadworksCones: [],
+        fountains: [],
+        complaintDepartments: [],
+      };
+      this.capturedPieces = [];
     } else {
       for (let i = 0; i < persistentLandExpansions; i++) this.expandBoard(4, { silent: true });
     }
@@ -430,7 +463,14 @@ class Game {
     this.pendingPawnSoldierShot = null;
     this.phase = "play";
     this.evaluateGameEnd();
-    if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, pending.from)) this.maybeStartRuleChoice();
+    if (
+      this.phase === "play" &&
+      !this.maybeStartBoardObjectVisit(playerId, pending.from) &&
+      !this.maybeStartSupermarketVisit(playerId, pending.from) &&
+      !this.maybeStartFruitMachineVisit(playerId, pending.from)
+    ) {
+      this.maybeStartRuleChoice();
+    }
     return { ok: true };
   }
 
@@ -591,6 +631,15 @@ class Game {
     this.matchStats.captures[attackerColor] += 1;
     if (capturedPiece.type === "q" && (capturedPiece.color === "w" || capturedPiece.color === "b")) {
       this.matchStats.queensSacrificed[capturedPiece.color] += 1;
+    }
+    if (capturedPiece.type !== "k" && (capturedPiece.color === "w" || capturedPiece.color === "b")) {
+      this.capturedPieces.push({
+        type: capturedPiece.type,
+        color: capturedPiece.color,
+        capturedBy: attackerColor,
+        ply: this.ply,
+      });
+      if (this.capturedPieces.length > 24) this.capturedPieces.shift();
     }
   }
 
@@ -1576,7 +1625,14 @@ class Game {
 
       this.ruleManager.tickAfterPly();
       this.evaluateGameEnd();
-      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo) && !this.maybeStartFruitMachineVisit(playerId, finalTo)) this.maybeStartRuleChoice();
+      if (
+        this.phase === "play" &&
+        !this.maybeStartBoardObjectVisit(playerId, finalTo) &&
+        !this.maybeStartSupermarketVisit(playerId, finalTo) &&
+        !this.maybeStartFruitMachineVisit(playerId, finalTo)
+      ) {
+        this.maybeStartRuleChoice();
+      }
       return { ok: true };
     }
 
@@ -1769,7 +1825,14 @@ class Game {
       this.pendingPawnSoldierShot = { playerId, color, from: finalTo };
       this.phase = "pawnSoldierShot";
     } else {
-      if (this.phase === "play" && !this.maybeStartSupermarketVisit(playerId, finalTo) && !this.maybeStartFruitMachineVisit(playerId, finalTo)) this.maybeStartRuleChoice();
+      if (
+        this.phase === "play" &&
+        !this.maybeStartBoardObjectVisit(playerId, finalTo) &&
+        !this.maybeStartSupermarketVisit(playerId, finalTo) &&
+        !this.maybeStartFruitMachineVisit(playerId, finalTo)
+      ) {
+        this.maybeStartRuleChoice();
+      }
     }
     return { ok: true };
   }
@@ -1897,6 +1960,30 @@ class Game {
           }
         : null,
       fruitMachines: this.fruitMachines.map((machine) => ({ square: machine.square, instanceId: machine.instanceId })),
+      boardObjects: {
+        parkingMeters: this.boardObjects.parkingMeters.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+        vendingMachines: this.boardObjects.vendingMachines.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+        portaloos: this.boardObjects.portaloos.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+        lostPropertyOffices: this.boardObjects.lostPropertyOffices.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+        roadworksCones: this.boardObjects.roadworksCones.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+        fountains: this.boardObjects.fountains.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+        complaintDepartments: this.boardObjects.complaintDepartments.map((item) => ({ square: item.square, instanceId: item.instanceId })),
+      },
+      boardPopup: this.boardPopup
+        ? {
+            active: true,
+            kind: this.boardPopup.kind,
+            playerId: this.boardPopup.playerId,
+            color: this.boardPopup.color,
+            square: this.boardPopup.square,
+            title: this.boardPopup.title,
+            status: this.boardPopup.status,
+            options: (this.boardPopup.options || []).map((option) => ({ id: option.id, label: option.label, detail: option.detail || "" })),
+            pieces: (this.boardPopup.pieces || []).map((piece) => ({ id: piece.id, type: piece.type, color: piece.color })),
+            stage: this.boardPopup.stage || null,
+            data: this.boardPopup.data || null,
+          }
+        : null,
       fruitMachine: this.fruitMachine
         ? {
             active: true,

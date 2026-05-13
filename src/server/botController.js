@@ -199,6 +199,49 @@ function createBotController({ rooms, pushEffectsAndState }) {
     }
     return items;
   }
+
+  function botHasPiece(game, color, types) {
+    const wanted = new Set(Array.isArray(types) ? types : [types]);
+    return game.state.board.some((p) => p && p.color === color && wanted.has(p.type));
+  }
+
+  function botBoardPopupChoice(game, bot) {
+    const popup = game.boardPopup;
+    if (!popup || popup.playerId !== bot.id) return null;
+
+    const options = popup.options || [];
+    const hasOption = (id) => options.some((option) => option.id === id);
+    const firstAvailable = (ids) => ids.find((id) => hasOption(id)) || null;
+
+    if (popup.kind === "lostProperty") {
+      const values = { q: 9, r: 5, b: 3, n: 3, p: 1 };
+      const piece = [...(popup.pieces || [])].sort((a, b) => (values[b.type] || 0) - (values[a.type] || 0))[0];
+      return piece?.id || firstAvailable(["close"]);
+    }
+
+    if (popup.kind === "auction") {
+      const color = game.playerColor(bot.id);
+      const lotId = popup.data?.lot?.id;
+      const canBidMinor = botHasPiece(game, color, ["n", "b"]);
+      const canBidPawn = botHasPiece(game, color, "p");
+      if ((lotId === "queen" || lotId === "shield") && canBidMinor && hasOption("3") && Math.random() < 0.5) return "3";
+      if (canBidPawn && hasOption("1")) return "1";
+      return firstAvailable(["0", "1", "3"]);
+    }
+
+    const preferred = {
+      parkingMeter: ["pay", "ignore", "kick"],
+      vendingMachine: ["promote", "shield", "duplicate"],
+      portaloo: ["enter", "leave"],
+      fountain: ["power", "peace", "splash"],
+      complaint: ["hazard", "unstick", "restore", "ads"],
+      terms: ["agree", "decline"],
+      survey: ["5", "4", "3", "2", "1"],
+      prizeWheel: popup.data?.spun ? ["collect"] : ["spin"],
+    };
+
+    return firstAvailable(preferred[popup.kind] || []) || randItem(options)?.id || null;
+  }
   
   function botTargetSquares(game, pending) {
     const color = pending?.color;
@@ -326,6 +369,11 @@ function createBotController({ rooms, pushEffectsAndState }) {
           ? !!game.collectFruitMachinePrizes(bot.id)?.ok
           : !!game.submitFruitMachineSpin(bot.id)?.ok;
       }
+    } else if (game.phase === "boardPopup") {
+      if (game.boardPopup?.playerId === bot.id) {
+        const choiceId = botBoardPopupChoice(game, bot);
+        if (choiceId != null) changed = !!game.submitBoardPopupChoice(bot.id, choiceId)?.ok;
+      }
     } else if (game.phase === "rps" && game.rps) {
       const color = game.playerColor(bot.id);
       if (color && !game.rps.byColor?.[color]) {
@@ -345,7 +393,7 @@ function createBotController({ rooms, pushEffectsAndState }) {
     }
   
     if (changed) pushEffectsAndState(roomCode);
-    else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "mutantFusion", "pawnSoldierShot", "supermarket", "fruitMachine"].includes(game.phase)) scheduleBotTurn(roomCode);
+    else if (["wager", "rps", "ruleChoice", "bonusRuleChoice", "targetRule", "mutantFusion", "pawnSoldierShot", "supermarket", "fruitMachine", "boardPopup"].includes(game.phase)) scheduleBotTurn(roomCode);
   }
   
   function scheduleBotTurn(roomCode) {
