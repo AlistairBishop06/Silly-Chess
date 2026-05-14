@@ -274,6 +274,7 @@ const miniGameMethods = {
   },
 
   submitBoardPopupChoice(playerId, choiceId) {
+    if (this.phase !== "boardPopup" && this.personalBoardPopups?.[playerId]?.kind === "terms") return this.resolvePersonalTerms(playerId, choiceId);
     if (this.phase !== "boardPopup" || !this.boardPopup) return { ok: false, error: "No popup is open" };
     if (this.boardPopup.playerId !== playerId) return { ok: false, error: "Waiting for the other player" };
     const popup = this.boardPopup;
@@ -298,7 +299,8 @@ const miniGameMethods = {
     const targetColor = color === "w" ? "b" : "w";
     const target = this.players.find((p) => p.color === targetColor);
     if (!target) return { ok: false, error: "Need opponent" };
-    this.startBoardPopup({
+    this.personalBoardPopups = this.personalBoardPopups || {};
+    this.personalBoardPopups[target.id] = {
       kind: "terms",
       playerId: target.id,
       color: targetColor,
@@ -309,7 +311,9 @@ const miniGameMethods = {
         { id: "agree", label: "I agree", detail: "Continue the game." },
         { id: "decline", label: "Decline", detail: "Hidden loophole: gain a shield, but lose one pawn." },
       ],
-    });
+      data: { personal: true, createdAt: Date.now() },
+    };
+    this.effects.push({ type: "log", id: this.nextEffectId(), text: `Terms and Conditions popped up for ${targetColor === "w" ? "White" : "Black"}.` });
     return { ok: true };
   },
 
@@ -377,6 +381,23 @@ const miniGameMethods = {
       this.effects.push({ type: "log", id: this.nextEffectId(), text: "Terms declined through a loophole. Shield granted, pawn invoiced." });
     }
     this.closeBoardPopup();
+    return { ok: true };
+  },
+
+  resolvePersonalTerms(playerId, choiceId) {
+    const popup = this.personalBoardPopups?.[playerId];
+    if (!popup || popup.kind !== "terms") return { ok: false, error: "No terms popup is open" };
+    if (choiceId !== "agree" && choiceId !== "decline") return { ok: false, error: "Choose agree or decline" };
+    const color = popup.color;
+    if (choiceId === "decline") {
+      const pawnSq = this.randomPieceSquare(color, (p) => p.type === "p");
+      if (pawnSq != null) this.state.board[pawnSq] = null;
+      this.shield[color] = (this.shield[color] || 0) + 1;
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Terms declined through a loophole. Shield granted, pawn invoiced." });
+    } else {
+      this.effects.push({ type: "log", id: this.nextEffectId(), text: "Terms accepted. The paperwork has been filed somewhere dramatic." });
+    }
+    delete this.personalBoardPopups[playerId];
     return { ok: true };
   },
 

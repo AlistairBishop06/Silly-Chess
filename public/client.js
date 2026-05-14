@@ -3861,14 +3861,13 @@ function spinPrizeWheelThenSubmit(choiceId) {
   state.prizeWheelSpinning = true;
   state.prizeWheelSpinKey = state.boardPopupKey;
   state.prizeWheelCollectKey = null;
-  renderBoardPopup();
   submitBoardPopup(choiceId);
 }
 
 function renderBoardPopup() {
   const s = state.serverState;
   const popup = s?.boardPopup;
-  const active = !!popup?.active && s?.phase === "boardPopup";
+  const active = !!popup?.active && (s?.phase === "boardPopup" || popup.personal);
   if (!els.boardPopupModal) return;
   els.boardPopupModal.hidden = !active;
   if (!active) {
@@ -3909,7 +3908,8 @@ function renderBoardPopup() {
   if (els.boardPopupStatus) els.boardPopupStatus.textContent = yourPopup ? popup.status || "" : "Opponent is handling a popup.";
   if (els.boardPopupSpecial) {
     const keepTermsScroll = popup.kind === "terms" && samePopupKey && els.boardPopupSpecial.querySelector(".termsScroll");
-    if (!keepTermsScroll) {
+    const keepPrizeWheel = popup.kind === "prizeWheel" && samePopupKey && els.boardPopupSpecial.querySelector(".prizeWheelVisual");
+    if (!keepTermsScroll && !keepPrizeWheel) {
       els.boardPopupSpecial.innerHTML = popupToyHtml(popup, yourPopup);
       els.boardPopupSpecial.querySelectorAll("[data-board-popup-choice]").forEach((btn) => {
         btn.addEventListener("click", () => submitBoardPopup(btn.dataset.boardPopupChoice));

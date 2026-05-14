@@ -216,7 +216,7 @@ const RULES = [
     id: "inst_terms_conditions",
     kind: "instant",
     name: "Terms and Conditions",
-    description: "The opponent must accept a suspicious popup before play continues. The hidden decline loophole gives a shield but costs a pawn.",
+    description: "The opponent gets a suspicious personal popup. Declining uses a loophole: gain a shield, but lose a pawn.",
     apply(game, ctx) {
       game.startTermsConditions?.(ctx?.playerId, ctx?.color);
     },

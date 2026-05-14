@@ -93,6 +93,7 @@ class Game {
       complaintDepartments: [],
     };
     this.boardPopup = null;
+    this.personalBoardPopups = {};
     this.capturedPieces = [];
 
     this.lastMoveSquares = [];
@@ -174,6 +175,7 @@ class Game {
     this.supermarket = null;
     this.fruitMachine = null;
     this.boardPopup = null;
+    this.personalBoardPopups = {};
     this.boardObjects = {
       parkingMeters: [],
       vendingMachines: [],
@@ -1887,6 +1889,7 @@ class Game {
       this.ruleManager.active.some(
         (inst) => inst.ruleId === "dur_ads_7" && inst.kind === "duration" && inst.data?.targetColor === requestingColor
       );
+    const clientBoardPopup = this.boardPopup || (playerId ? this.personalBoardPopups?.[playerId] : null);
 
     return {
       roomCode: this.roomCode,
@@ -1969,19 +1972,20 @@ class Game {
         fountains: this.boardObjects.fountains.map((item) => ({ square: item.square, instanceId: item.instanceId })),
         complaintDepartments: this.boardObjects.complaintDepartments.map((item) => ({ square: item.square, instanceId: item.instanceId })),
       },
-      boardPopup: this.boardPopup
+      boardPopup: clientBoardPopup
         ? {
             active: true,
-            kind: this.boardPopup.kind,
-            playerId: this.boardPopup.playerId,
-            color: this.boardPopup.color,
-            square: this.boardPopup.square,
-            title: this.boardPopup.title,
-            status: this.boardPopup.status,
-            options: (this.boardPopup.options || []).map((option) => ({ id: option.id, label: option.label, detail: option.detail || "" })),
-            pieces: (this.boardPopup.pieces || []).map((piece) => ({ id: piece.id, type: piece.type, color: piece.color })),
-            stage: this.boardPopup.stage || null,
-            data: this.boardPopup.data || null,
+            personal: !this.boardPopup,
+            kind: clientBoardPopup.kind,
+            playerId: clientBoardPopup.playerId,
+            color: clientBoardPopup.color,
+            square: clientBoardPopup.square,
+            title: clientBoardPopup.title,
+            status: clientBoardPopup.status,
+            options: (clientBoardPopup.options || []).map((option) => ({ id: option.id, label: option.label, detail: option.detail || "" })),
+            pieces: (clientBoardPopup.pieces || []).map((piece) => ({ id: piece.id, type: piece.type, color: piece.color })),
+            stage: clientBoardPopup.stage || null,
+            data: clientBoardPopup.data || null,
           }
         : null,
       fruitMachine: this.fruitMachine

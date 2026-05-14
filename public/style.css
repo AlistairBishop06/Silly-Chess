@@ -3724,11 +3724,11 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
 }
 
 .wheelCabinet.is-requesting .prizeWheelVisual {
-  animation: wheelFreeSpin 520ms linear infinite;
+  animation: none;
 }
 
 .wheelCabinet.is-settling .prizeWheelVisual {
-  animation: wheelSettle var(--wheel-duration, 3600ms) cubic-bezier(0.05, 0.82, 0.02, 1) forwards;
+  animation: wheelSettle var(--wheel-duration, 3600ms) cubic-bezier(0.03, 0.78, 0.02, 1) forwards;
 }
 
 .wheelCabinet .prizeWheelVisual span {
@@ -3822,21 +3822,6 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
 @keyframes wheelSettle {
   0% {
     transform: rotate(0deg);
-  }
-  28% {
-    transform: rotate(calc(var(--wheel-rotation) * 0.54));
-  }
-  52% {
-    transform: rotate(calc(var(--wheel-rotation) * 0.78));
-  }
-  72% {
-    transform: rotate(calc(var(--wheel-rotation) - 48deg));
-  }
-  88% {
-    transform: rotate(calc(var(--wheel-rotation) - 10deg));
-  }
-  96% {
-    transform: rotate(calc(var(--wheel-rotation) + 2deg));
   }
   100% {
     transform: rotate(var(--wheel-rotation));
