@@ -4548,6 +4548,11 @@ body.is-debug-choice #choiceArea .cardsHeader h3::after {
   box-shadow: 0 0 0 4px rgba(156, 255, 107, 0.14);
 }
 
+.onlineDot.offline {
+  background: rgba(249, 251, 255, 0.42);
+  box-shadow: 0 0 0 4px rgba(249, 251, 255, 0.08);
+}
+
 .profileBio {
   color: rgba(249, 251, 255, 0.82);
   line-height: 1.35;

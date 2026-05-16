@@ -1567,6 +1567,9 @@ function renderProfile() {
   const bio = profile.bio ? escapeHtml(profile.bio) : "No bio yet.";
   const tier = escapeHtml(rank.tier || "Bronze");
   const progress = Math.max(0, Math.min(100, Number(rank.progress || 0)));
+  const onlineStatus = profile.onlineStatus || (readOnly ? "Offline" : "Online");
+  const onlineStatusKey = String(onlineStatus).toLowerCase();
+  const onlineClass = onlineStatusKey === "online" || onlineStatusKey === "in match" ? "online" : "offline";
 
   const hero = `
     <div class="profileHero profileBanner-${bannerClass(profile.banner)}">
@@ -1575,7 +1578,7 @@ function renderProfile() {
         <div class="profileNameRow">
           <div>
             <div class="profileName">${escapeHtml(user.username)}</div>
-            <div class="profileMeta">Joined ${escapeHtml(created)} &middot; ${country} &middot; <span class="onlineDot"></span>${escapeHtml(profile.onlineStatus || "Online")}</div>
+            <div class="profileMeta">Joined ${escapeHtml(created)} &middot; ${country} &middot; <span class="onlineDot ${onlineClass}"></span>${escapeHtml(onlineStatus)}</div>
           </div>
           <div class="rankBadge">
             <strong>${tier}</strong>
@@ -2535,7 +2538,7 @@ async function openUserProfileByName(username) {
   state.viewedProfile = {
     username: name,
     createdAt: null,
-    profile: { avatarSeed: `friend:${name}`, bio: "Profile details are loading.", onlineStatus: "Online", banner: "Sunset Clash" },
+    profile: { avatarSeed: `friend:${name}`, bio: "Profile details are loading.", onlineStatus: "Loading...", banner: "Sunset Clash" },
     stats: {},
     rank: { rating: 1000, tier: "Unranked", progress: 0 },
     matchHistory: [],

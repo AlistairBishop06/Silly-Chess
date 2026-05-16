@@ -71,10 +71,17 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     const p = entry.room.players.find((pl) => pl.id === playerId);
     if (!p) return;
     if (p.bot) return;
+    if (p.userId) markUserOnline(socket, { id: p.userId, username: p.name });
     p.socketId = socket.id;
     p.disconnectedAt = null;
     socket.join(code);
     entry.socketsByPlayerId.set(p.id, socket.id);
+  }
+
+  function markUserOnline(socket, account) {
+    if (!account?.id) return;
+    socket.data.userId = account.id;
+    onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
   }
   
   function emitRoomState(roomCode) {
@@ -162,6 +169,20 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     return !activeRoomForUser(userId);
   }
 
+  function isUserOnline(userId) {
+    const online = onlineUsers.get(userId);
+    return !!online?.socketId && !!io.sockets.sockets.get(online.socketId);
+  }
+
+  function setUserOffline(userId) {
+    const online = onlineUsers.get(userId);
+    if (online?.socketId) {
+      const socket = io.sockets.sockets.get(online.socketId);
+      if (socket?.data?.userId === userId) socket.data.userId = null;
+    }
+    onlineUsers.delete(userId);
+  }
+
   function sendSocialState(user) {
     if (!user?.id) return;
     const online = onlineUsers.get(user.id);
@@ -197,8 +218,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("social:identify", ({ authToken } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in first." });
-      socket.data.userId = account.id;
-      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
+      markUserOnline(socket, account);
       cb?.({ ok: true });
       sendSocialState(account);
     });
@@ -255,7 +275,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("lobby:create", ({ authToken, visibility } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in before creating a server." });
-      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
+      markUserOnline(socket, account);
       const code = createLobbyCode((c) => rooms.has(c));
       const room = createRoom(code, { visibility });
       room.game = new Game({ roomCode: code, debugMode: runtimeFlags.debugMode });
@@ -275,7 +295,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("lobby:singleplayer", ({ authToken, rulePoolIds, campaignLevel } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in before starting singleplayer." });
-      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
+      markUserOnline(socket, account);
       const code = createLobbyCode((c) => rooms.has(c));
       const room = createRoom(code, { visibility: "private" });
       const knownRuleIds = new Set(allRules().map((rule) => rule.id));
@@ -334,7 +354,7 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
     socket.on("lobby:join", ({ code, authToken } = {}, cb) => {
       const account = accountFromPayload({ authToken });
       if (!account) return cb?.({ ok: false, error: "Sign in before joining a server." });
-      onlineUsers.set(account.id, { socketId: socket.id, username: account.username });
+      markUserOnline(socket, account);
       const entry = rooms.get(code);
       if (!entry) return cb?.({ ok: false, error: "Lobby not found" });
       const room = entry.room;
@@ -570,7 +590,9 @@ function createRealtimeController({ io, runtimeFlags, accountService, recordMatc
   }
 
   return {
+    isUserOnline,
     rooms,
+    setUserOffline,
     updateActivePlayerNamesInRooms,
   };
 }

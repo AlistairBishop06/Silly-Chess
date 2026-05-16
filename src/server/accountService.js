@@ -7,7 +7,7 @@ const { COSMETIC_CATALOG, COSMETIC_PROFILE_FIELDS } = require("./account/cosmeti
 const { readBoolEnv } = require("./env");
 const { allRules, getRuleById } = require("./game/rules/ruleset");
 
-function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} } = {}) {
+function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {}, isUserOnline = () => false, setUserOffline = () => {} } = {}) {
   const DATA_DIR = path.join(rootDir || process.cwd(), "data");
   const USERS_FILE = path.join(DATA_DIR, "users.json");
   const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL || "";
@@ -765,7 +765,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     return `/api/avatar/${encodeURIComponent(avatarStyle)}.svg?seed=${encodeURIComponent(avatarSeed)}`;
   }
 
-  function publicProfile(user) {
+  function publicProfile(user, { forceOnline = false } = {}) {
     hydrateUser(user);
     const p = user?.profile || {};
     const style = avatarStyleKey(p.avatar);
@@ -775,6 +775,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       avatar: style,
       avatarSeed: seed,
       avatarUrl: avatarUrl(style, seed),
+      onlineStatus: forceOnline || isUserOnline(user?.id) ? "Online" : "Offline",
     };
   }
 
@@ -946,7 +947,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     player.profile = publicPlayerProfile(account);
   }
   
-  function publicUser(user, { awardAchievements = true } = {}) {
+  function publicUser(user, { awardAchievements = true, forceOnline = false } = {}) {
     hydrateUser(user);
     if (!user) return null;
     const achievementState = buildAchievementsForUser(user, { award: awardAchievements });
@@ -971,7 +972,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       username: user.username,
       isAdmin: !!user.isAdmin,
       createdAt: user.createdAt,
-      profile: publicProfile(user),
+      profile: publicProfile(user, { forceOnline }),
       stats: {
         ...user.stats,
         winRate,
@@ -1111,6 +1112,8 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
   }
 
   function registerRoutes(app) {
+    const publicAuthedUser = (user, options = {}) => publicUser(user, { ...options, forceOnline: true });
+
     app.get("/api/avatar/:style.svg", async (req, res) => {
       try {
         const style = avatarStyleKey(req.params.style);
@@ -1185,7 +1188,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     
       const token = createSession(user.id);
       await flushUserStoreWrites();
-      res.json({ ok: true, token, user: publicUser(user) });
+      res.json({ ok: true, token, user: publicAuthedUser(user) });
     });
     
     app.post("/api/auth/login", async (req, res) => {
@@ -1196,23 +1199,25 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       }
       const token = createSession(user.id);
       await flushUserStoreWrites();
-      res.json({ ok: true, token, user: publicUser(user) });
+      res.json({ ok: true, token, user: publicAuthedUser(user) });
     });
     
     app.post("/api/auth/logout", async (req, res) => {
       const token = authTokenFromReq(req) || req.body?.token;
+      const userId = token && userStore.sessions[token]?.userId;
       if (token && userStore.sessions[token]) {
         delete userStore.sessions[token];
         saveUsers(userStore, { deleteSessionTokens: [token] });
         await flushUserStoreWrites();
       }
+      if (userId) setUserOffline(userId);
       res.json({ ok: true });
     });
     
     app.get("/api/me", (req, res) => {
       const user = accountFromToken(authTokenFromReq(req));
       if (!user) return res.status(401).json({ ok: false, error: "Not signed in." });
-      res.json({ ok: true, user: publicUser(user) });
+      res.json({ ok: true, user: publicAuthedUser(user) });
     });
     
     app.patch("/api/me", async (req, res) => {
@@ -1249,13 +1254,13 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     
       saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user) });
+      res.json({ ok: true, user: publicAuthedUser(user) });
     });
     
     app.get("/api/me/campaign", (req, res) => {
       const user = authedUser(req, res);
       if (!user) return;
-      res.json({ ok: true, campaign: ensureCampaignProgress(user), user: publicUser(user) });
+      res.json({ ok: true, campaign: ensureCampaignProgress(user), user: publicAuthedUser(user) });
     });
     
     app.patch("/api/me/campaign", async (req, res) => {
@@ -1268,7 +1273,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         user.campaign = createDefaultCampaignProgress(plan);
         saveUsers(userStore, { userIds: [user.id] });
         await flushUserStoreWrites();
-        return res.json({ ok: true, campaign: user.campaign, user: publicUser(user) });
+        return res.json({ ok: true, campaign: user.campaign, user: publicAuthedUser(user) });
       }
     
       if (action === "openChest") {
@@ -1276,7 +1281,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
         if (!result.ok) return res.status(400).json(result);
         saveUsers(userStore, { userIds: [user.id] });
         await flushUserStoreWrites();
-        return res.json({ ok: true, campaign: result.campaign, rewards: result.rewards || [], user: publicUser(user) });
+        return res.json({ ok: true, campaign: result.campaign, rewards: result.rewards || [], user: publicAuthedUser(user) });
       }
     
       res.status(400).json({ ok: false, error: "Unknown campaign action." });
@@ -1295,7 +1300,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       const name = String(req.body?.name || "");
       const item = catalogItem(group, name);
       if (!item) return res.status(404).json({ ok: false, error: "Shop item not found." });
-      if (ownsCosmetic(user, group, name)) return res.json({ ok: true, user: publicUser(user), alreadyOwned: true });
+      if (ownsCosmetic(user, group, name)) return res.json({ ok: true, user: publicAuthedUser(user), alreadyOwned: true });
       if ((item.price || 0) > 0 && !isDailyShopOffer(group, name)) {
         return res.status(400).json({ ok: false, error: "That item is not in today's shop." });
       }
@@ -1307,7 +1312,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       user.cosmetics[group] = [...new Set([...(user.cosmetics[group] || []), name])];
       saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user), bought: { group, name, price: item.price } });
+      res.json({ ok: true, user: publicAuthedUser(user), bought: { group, name, price: item.price } });
     });
     
     app.patch("/api/me/password", async (req, res) => {
@@ -1334,7 +1339,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       const friend = userStore.users[usernameKey(friendName)];
       if (!friend) return res.status(404).json({ ok: false, error: "Player not found." });
       hydrateUser(friend);
-      if (areFriends(user, friend)) return res.json({ ok: true, user: publicUser(user), alreadyFriends: true });
+      if (areFriends(user, friend)) return res.json({ ok: true, user: publicAuthedUser(user), alreadyFriends: true });
       const existing = (friend.social.notifications || []).find(
         (n) => n?.type === "friendRequest" && n.fromUserId === user.id
       );
@@ -1348,7 +1353,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       }
       saveUsers(userStore, { userIds: [friend.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user), requested: true });
+      res.json({ ok: true, user: publicAuthedUser(user), requested: true });
     });
 
     app.delete("/api/me/friends/:username", async (req, res) => {
@@ -1362,7 +1367,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       friend.social.friends = (friend.social.friends || []).filter((name) => usernameKey(name) !== user.usernameKey);
       saveUsers(userStore, { userIds: [user.id, friend.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user) });
+      res.json({ ok: true, user: publicAuthedUser(user) });
     });
 
     app.get("/api/clubs", (req, res) => {
@@ -1407,7 +1412,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       userStore.clubs[club.id] = club;
       saveUsers(userStore, { userIds: [user.id], clubIds: [club.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, club: publicClubDetail(club, user), user: publicUser(user) });
+      res.json({ ok: true, club: publicClubDetail(club, user), user: publicAuthedUser(user) });
     });
 
     app.get("/api/clubs/:clubId", (req, res) => {
@@ -1451,7 +1456,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       delete userStore.clubs[club.id];
       saveUsers(userStore, { deleteClubIds: [club.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user) });
+      res.json({ ok: true, user: publicAuthedUser(user) });
     });
 
     app.post("/api/clubs/:clubId/request", async (req, res) => {
@@ -1523,7 +1528,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       addClubActivity(club, `${user.username} left the club.`);
       saveUsers(userStore, { clubIds: [club.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user) });
+      res.json({ ok: true, user: publicAuthedUser(user) });
     });
 
     async function setClubMemberRole(req, res, role) {
@@ -1581,7 +1586,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
     app.get("/api/me/notifications", (req, res) => {
       const user = authedUser(req, res);
       if (!user) return;
-      res.json({ ok: true, notifications: publicNotifications(user), user: publicUser(user) });
+      res.json({ ok: true, notifications: publicNotifications(user), user: publicAuthedUser(user) });
     });
 
     app.post("/api/me/notifications/:id/accept", async (req, res) => {
@@ -1607,7 +1612,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       });
       saveUsers(userStore, { userIds: [user.id, sender.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, user: publicUser(user), notifications: publicNotifications(user) });
+      res.json({ ok: true, user: publicAuthedUser(user), notifications: publicNotifications(user) });
     });
 
     app.delete("/api/me/notifications/:id", async (req, res) => {
@@ -1616,7 +1621,7 @@ function createAccountService({ rootDir, runtimeFlags, onUserUpdated = () => {} 
       removeNotification(user, req.params.id);
       saveUsers(userStore, { userIds: [user.id] });
       await flushUserStoreWrites();
-      res.json({ ok: true, notifications: publicNotifications(user), user: publicUser(user) });
+      res.json({ ok: true, notifications: publicNotifications(user), user: publicAuthedUser(user) });
     });
     
     app.delete("/api/me", async (req, res) => {

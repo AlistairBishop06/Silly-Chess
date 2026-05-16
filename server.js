@@ -21,6 +21,12 @@ let realtimeController = null;
 const accountService = createAccountService({
   rootDir: __dirname,
   runtimeFlags,
+  isUserOnline(userId) {
+    return !!realtimeController?.isUserOnline(userId);
+  },
+  setUserOffline(userId) {
+    realtimeController?.setUserOffline(userId);
+  },
   onUserUpdated(user) {
     realtimeController?.updateActivePlayerNamesInRooms(user);
   },
